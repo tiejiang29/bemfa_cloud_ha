@@ -89,6 +89,8 @@ OAuth mode reuses the BeHome authentication flow. Users who use OAuth need to cr
 3. Add **Bemfa Cloud** from the integrations page
 4. Choose OAuth and complete authorization
 
+If OAuth redirects to `homeassistant.local` and the browser cannot open it, configure the correct Home Assistant URL in **Settings** -> **System** -> **Network**. For local Docker testing, use `http://localhost:8123`. For LAN access, use `http://your-ha-host-ip:8123`.
+
 ## How It Works
 
 1. The integration scans supported HA entities

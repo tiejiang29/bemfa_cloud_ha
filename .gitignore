@@ -9,6 +9,7 @@ __pycache__/
 # Home Assistant local/runtime files
 .storage/
 deps/
+info.md
 home-assistant.log*
 home-assistant_v2.db*
 secrets.yaml
