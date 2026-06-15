@@ -1,0 +1,155 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Bemfa Cloud",
+        "menu_options": {
+          "keys": "手动输入私钥",
+          "pick_implementation": "使用巴法 OAuth 登录"
+        }
+      },
+      "keys": {
+        "title": "巴法云凭据",
+        "data": {
+          "uid": "巴法云私钥"
+        }
+      }
+    },
+    "error": {
+      "invalid_uid": "非法的巴法云私钥"
+    },
+    "abort": {
+      "already_configured": "此巴法云账号已经配置",
+      "oauth_failed": "OAuth 认证失败",
+      "oauth_missing_uid": "OAuth 已成功，但 token 响应没有返回巴法云私钥"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Bemfa Cloud",
+        "menu_options": {
+          "create_all_syncs": "批量同步实体",
+          "create_sync": "同步单个实体",
+          "modify_sync": "编辑同步",
+          "destroy_sync": "删除同步"
+        }
+      },
+      "create_all_syncs": {
+        "title": "批量同步实体",
+        "description": "所选实体会通过批量接口创建为巴法云 TCP V2 主题。",
+        "data": {
+          "select": "实体"
+        }
+      },
+      "create_sync": {
+        "title": "同步单个实体",
+        "data": {
+          "select": "实体"
+        }
+      },
+      "modify_sync": {
+        "title": "编辑同步",
+        "data": {
+          "select": "实体"
+        }
+      },
+      "destroy_sync": {
+        "title": "删除同步",
+        "data": {
+          "select": "主题"
+        }
+      },
+      "empty": {
+        "title": "无可操作同步"
+      },
+      "sync_config_sensor": {
+        "title": "配置传感器",
+        "data": {
+          "name": "名称",
+          "temperature": "温度传感器",
+          "humidity": "湿度传感器",
+          "illuminance": "光照传感器",
+          "pm25": "PM2.5 传感器",
+          "co2": "CO2 传感器"
+        }
+      },
+      "sync_config_binary_sensor": {
+        "title": "配置二元传感器",
+        "data": {
+          "name": "名称"
+        }
+      },
+      "sync_config_climate": {
+        "title": "配置空调",
+        "data": {
+          "name": "名称",
+          "fan_speed_0_value": "自动风速",
+          "fan_speed_1_value": "一档风速",
+          "fan_speed_2_value": "二档风速",
+          "fan_speed_3_value": "三档风速",
+          "fan_speed_4_value": "四档风速",
+          "fan_speed_5_value": "五档风速",
+          "swing_off_value": "关闭扫风",
+          "swing_horizontal_value": "左右扫风",
+          "swing_vertical_value": "上下扫风",
+          "swing_both_value": "左右且上下扫风"
+        }
+      },
+      "sync_config_cover": {
+        "title": "配置窗帘",
+        "data": {
+          "name": "名称"
+        }
+      },
+      "sync_config_fan": {
+        "title": "配置风扇",
+        "data": {
+          "name": "名称"
+        }
+      },
+      "sync_config_light": {
+        "title": "配置灯",
+        "data": {
+          "name": "名称"
+        }
+      },
+      "sync_config_switch": {
+        "title": "配置开关",
+        "data": {
+          "name": "名称"
+        }
+      },
+      "sync_config_outlet": {
+        "title": "配置插座",
+        "data": {
+          "name": "名称"
+        }
+      },
+      "sync_config_thermostat": {
+        "title": "配置温控器",
+        "data": {
+          "name": "名称"
+        }
+      },
+      "sync_config_water_heater": {
+        "title": "配置热水器",
+        "data": {
+          "name": "名称"
+        }
+      },
+      "sync_config_tv": {
+        "title": "配置电视",
+        "data": {
+          "name": "名称"
+        }
+      },
+      "sync_config_air_purifier": {
+        "title": "配置空气净化器",
+        "data": {
+          "name": "名称"
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "config": {
+    "error": {
+      "invalid_uid": "Invalid Bemfa private key"
+    },
+    "abort": {
+      "already_configured": "This Bemfa account is already configured"
+    }
+  }
+}

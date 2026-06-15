@@ -1,0 +1,24 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Home Assistant local/runtime files
+.storage/
+deps/
+home-assistant.log*
+home-assistant_v2.db*
+secrets.yaml
+known_devices.yaml
+
+# Local environment
+.env
+.env.*
+
+# OS/editor
+.DS_Store
+.idea/
+.vscode/
