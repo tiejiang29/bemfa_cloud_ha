@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.1.3
+## 0.1.4
 
 - Fix entities being synced even when they were not selected.
 - Improve TCP keepalive with 30-second heartbeats and periodic topic resubscription.
