@@ -193,7 +193,10 @@ class Climate(ControllableSync):
         syncs = []
         for state in hass.states.async_all(cls._supported_domain()):
             hvac_modes = state.attributes.get(ATTR_HVAC_MODES, [])
-            if HVACMode.COOL not in hvac_modes and HVACMode.HEAT not in hvac_modes:
+            # Only treat as air-conditioner (005) when the entity supports COOL.
+            # Heat-only entities (e.g. floor heating / thermostat) fall through
+            # to the Thermostat subclass and be reported as 010.
+            if HVACMode.COOL not in hvac_modes:
                 continue
             syncs.append(cls(hass, state.entity_id, state.name))
         return syncs
@@ -339,9 +342,14 @@ class Thermostat(Climate):
 
     @classmethod
     def collect_supported_syncs(cls, hass):
+        # Treat a climate entity as a thermostat / floor-heating device (010)
+        # whenever it does NOT support COOL. This covers both:
+        #   * heat-only devices (floor heating, radiator, wall thermostat)
+        #   * entities without any HVAC mode information
+        # Air-conditioners (which must support COOL) are handled by the
+        # Climate parent class and reported as 005.
         return [
             cls(hass, state.entity_id, state.name)
             for state in hass.states.async_all(cls._supported_domain())
             if HVACMode.COOL not in state.attributes.get(ATTR_HVAC_MODES, [])
-            and HVACMode.HEAT not in state.attributes.get(ATTR_HVAC_MODES, [])
         ]
