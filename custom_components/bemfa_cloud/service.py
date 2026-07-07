@@ -6,7 +6,7 @@ from homeassistant.const import EVENT_HOMEASSISTANT_STARTED, SERVICE_TURN_OFF, S
 from homeassistant.core import CALLBACK_TYPE, CoreState, Event, HomeAssistant
 from homeassistant.helpers import area_registry, device_registry, entity_registry
 
-from .const import EXCLUDED_SOURCE_PLATFORMS, LOGGER, OPTIONS_NAME
+from .const import DOMAIN, EXCLUDED_SOURCE_PLATFORMS, LOGGER, OPTIONS_NAME
 from .http import BemfaCloudHttp, TopicPayload
 from .sync import SYNC_TYPES, Sync
 from .tcp import BemfaCloudTcp
@@ -33,11 +33,22 @@ class BemfaCloudService:
         await self._tcp.async_start()
 
         async def _start(event: Event | None = None) -> None:
+            # Delay 1 second before restoring. HA's add_update_listener
+            # fires multiple reload events in rapid succession on options
+            # change — without delay, each reload creates a new service
+            # that races to call the Bemfa API and connect TCP, causing
+            # connection storms and "session is closed" errors.
+            #
+            # The 1-second delay + the in_progress guard in
+            # _async_restore_syncs together ensure that even if multiple
+            # reloads fire, only one actually hits the Bemfa API.
+            import asyncio
+            await asyncio.sleep(1)
             await self._async_restore_syncs()
 
         if self._hass.state == CoreState.running:
             self._hass.async_create_background_task(
-                self._async_restore_syncs(), "bemfa_cloud_restore_syncs"
+                _start(), "bemfa_cloud_restore_syncs"
             )
         else:
             self._hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STARTED, _start)
@@ -53,23 +64,37 @@ class BemfaCloudService:
         await self._tcp.async_stop()
 
     async def _async_restore_syncs(self) -> None:
-        # Debounce: if a restore is already in progress, skip this one.
-        # HA's add_update_listener can fire multiple times in rapid succession
-        # when options change (once for the option update itself, plus
-        # follow-up fires from related state changes). Without debouncing,
-        # we'd call the Bemfa create-topics API N times for the same config,
-        # which wastes API calls and can trigger Bemfa's rate limit.
-        if getattr(self, "_restore_in_progress", False):
+        # Debounce: if a restore is already in progress FOR THIS HASS
+        # INSTANCE (not just this service instance — HA creates a new
+        # BemfaCloudService on every reload, so an instance-level guard
+        # is useless). We use hass.data as a shared namespace across
+        # service instances.
+        #
+        # Without this, HA's add_update_listener fires multiple reload
+        # events on options change, each creating a new service that
+        # races to call the Bemfa create-topics API. The result is
+        # dozens of duplicate API calls in 1-2 seconds, which can:
+        #   1. Trigger Bemfa's rate limit
+        #   2. Overwhelm the TCP connection (hundreds of concurrent
+        #      connect attempts -> "TCP connection failed: " with empty
+        #      error message)
+        #   3. Cause aiohttp "Session is closed" errors that propagate
+        #      up as empty-message exceptions caught by _ensure_topics.
+        DOMAIN_DATA = self._hass.data.setdefault(DOMAIN, {})
+        service_data = DOMAIN_DATA.setdefault("_restore_state", {})
+        if service_data.get("in_progress", False):
             LOGGER.warning(
-                "Bemfa Cloud restore: already in progress, skipping this call "
-                "(HA fired reload multiple times — this is normal)"
+                "Bemfa Cloud restore: another restore is already in progress "
+                "(probably from a recent reload), skipping this one to avoid "
+                "duplicate API calls and TCP connection storms."
             )
             return
-        self._restore_in_progress = True
+
+        service_data["in_progress"] = True
         try:
             await self._async_restore_syncs_inner()
         finally:
-            self._restore_in_progress = False
+            service_data["in_progress"] = False
 
     async def _async_restore_syncs_inner(self) -> None:
         LOGGER.warning(
@@ -113,11 +138,16 @@ class BemfaCloudService:
             await self._ensure_topics(syncs)
             LOGGER.warning("Bemfa Cloud restore: _ensure_topics succeeded for %d syncs", len(syncs))
         except Exception as err:  # noqa: BLE001
+            # Use repr() instead of str() because some exceptions (e.g.
+            # aiohttp ClientError / RuntimeError "Session is closed") have
+            # an empty str() but a meaningful repr().
             LOGGER.error(
-                "Bemfa Cloud restore: _ensure_topics FAILED for %d syncs: %s. "
+                "Bemfa Cloud restore: _ensure_topics FAILED for %d syncs: "
+                "%s (type=%s, repr=%r). "
                 "Topics that should have been created: %s",
-                len(syncs), err,
+                len(syncs), err, type(err).__name__, err,
                 [(s.topic, s.name) for s in syncs],
+                exc_info=True,
             )
             raise
 
@@ -125,7 +155,11 @@ class BemfaCloudService:
             await self._tcp.async_add_syncs(syncs)
             LOGGER.warning("Bemfa Cloud restore: TCP subscribe succeeded for %d syncs", len(syncs))
         except Exception as err:  # noqa: BLE001
-            LOGGER.error("Bemfa Cloud restore: TCP subscribe FAILED: %s", err)
+            LOGGER.error(
+                "Bemfa Cloud restore: TCP subscribe FAILED: %s (type=%s, repr=%r)",
+                err, type(err).__name__, err,
+                exc_info=True,
+            )
             raise
 
         self._syncs_by_entity_id = {sync.entity_id: sync for sync in syncs}
