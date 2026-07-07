@@ -183,7 +183,7 @@ class BemfaCloudHttp:
         if code == 40004:
             # Topic doesn't exist or not owned by this uid — the desired
             # end state (topic gone) is already true, so this is a success.
-            LOGGER.info(
+            LOGGER.warning(
                 "Bemfa topic %s not found on cloud (code 40004) — treat as deleted",
                 payload.get("topic"),
             )
@@ -199,7 +199,7 @@ class BemfaCloudHttp:
 
         # Log the raw response at debug level so we can diagnose silent
         # failures where Bemfa returns an unexpected shape.
-        LOGGER.debug(
+        LOGGER.warning(
             "Bemfa API %s payload=%s response_status=%s response_body=%s",
             url, payload, response.status, data,
         )
@@ -223,7 +223,7 @@ class BemfaCloudHttp:
         if isinstance(raw_data, dict):
             business_code = raw_data.get("code", 0)
             if business_code == 40006:
-                LOGGER.debug("Bemfa topic already exists: %s", payload)
+                LOGGER.warning("Bemfa topic already exists: %s", payload)
                 return
             if business_code != 0:
                 raise BemfaCloudApiError(

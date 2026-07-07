@@ -397,7 +397,7 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
         self._sync: Sync | None = None
         self._is_create = True
 
-        LOGGER.info(
+        LOGGER.warning(
             "Bemfa Cloud OptionsFlowHandler __init__: entry_id=%s, "
             "entry.options keys=%s, entry.options=%s, "
             "OPTIONS_CONFIG extracted=%s (type=%s, len=%s)",
@@ -412,7 +412,7 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
     async def async_step_init(self, user_input: dict[str, Any] | None = None) -> FlowResult:
         """Show option menu."""
 
-        LOGGER.info(
+        LOGGER.warning(
             "Bemfa Cloud flow: async_step_init called. user_input=%s, "
             "current config has %d keys",
             user_input, len(self._config),
@@ -428,7 +428,7 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
         """Create many syncs at once."""
 
         # ALWAYS log entry into this step, regardless of user_input
-        LOGGER.info(
+        LOGGER.warning(
             "Bemfa Cloud flow: async_step_create_all_syncs ENTERED. "
             "user_input is %s, user_input value=%s, sync_dict has %d entries, "
             "config has %d keys",
@@ -440,13 +440,13 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
 
         if user_input is not None:
             # Dump ALL keys in user_input so we can see what HA actually sent
-            LOGGER.info(
+            LOGGER.warning(
                 "Bemfa Cloud flow: user_input ALL keys=%s, ALL values=%s",
                 list(user_input.keys()),
                 {k: (str(v)[:100] + '...' if len(str(v)) > 100 else v) for k, v in user_input.items()},
             )
             selected = user_input.get(OPTIONS_SELECT, [])
-            LOGGER.info(
+            LOGGER.warning(
                 "Bemfa Cloud create_all_syncs: user submitted. "
                 "OPTIONS_SELECT=%s (type=%s, len=%s), sync_dict has %d entries",
                 selected, type(selected).__name__,
@@ -474,7 +474,7 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
             # HA versions)
             if isinstance(selected, str):
                 selected = [selected]
-                LOGGER.info(
+                LOGGER.warning(
                     "Bemfa Cloud create_all_syncs: converted string to list: %s",
                     selected,
                 )
@@ -515,13 +515,13 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
             for sync in syncs:
                 sync.config = {OPTIONS_NAME: sync.name}
                 self._config[sync.default_topic] = sync.config.copy()
-                LOGGER.info(
+                LOGGER.warning(
                     "Bemfa Cloud create_all_syncs: saving config for entity=%s "
                     "default_topic=%s name=%s",
                     sync.entity_id, sync.default_topic, sync.name,
                 )
 
-            LOGGER.info(
+            LOGGER.warning(
                 "Bemfa Cloud create_all_syncs: saving %d syncs to config entry options. "
                 "Total config keys after save: %d",
                 len(syncs), len(self._config),
@@ -529,7 +529,7 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
             return self.async_create_entry(title="", data={OPTIONS_CONFIG: self._config})
 
         self._sync_dict = self._collect_batchable_syncs()
-        LOGGER.info(
+        LOGGER.warning(
             "Bemfa Cloud create_all_syncs: showing form with %d selectable syncs",
             len(self._sync_dict),
         )
