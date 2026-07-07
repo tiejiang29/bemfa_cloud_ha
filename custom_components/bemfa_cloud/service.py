@@ -24,6 +24,7 @@ class BemfaCloudService:
         self._config: dict[str, dict[str, str]] = {}
         self._syncs_by_entity_id: dict[str, Sync] = {}
         self._unsub_registry_listeners: list[CALLBACK_TYPE] = []
+        self._restore_in_progress: bool = False
 
     async def async_start(self, config: dict[str, dict[str, str]]) -> None:
         """Start service and restore configured syncs."""
@@ -52,6 +53,25 @@ class BemfaCloudService:
         await self._tcp.async_stop()
 
     async def _async_restore_syncs(self) -> None:
+        # Debounce: if a restore is already in progress, skip this one.
+        # HA's add_update_listener can fire multiple times in rapid succession
+        # when options change (once for the option update itself, plus
+        # follow-up fires from related state changes). Without debouncing,
+        # we'd call the Bemfa create-topics API N times for the same config,
+        # which wastes API calls and can trigger Bemfa's rate limit.
+        if getattr(self, "_restore_in_progress", False):
+            LOGGER.warning(
+                "Bemfa Cloud restore: already in progress, skipping this call "
+                "(HA fired reload multiple times — this is normal)"
+            )
+            return
+        self._restore_in_progress = True
+        try:
+            await self._async_restore_syncs_inner()
+        finally:
+            self._restore_in_progress = False
+
+    async def _async_restore_syncs_inner(self) -> None:
         LOGGER.warning(
             "Bemfa Cloud restore: starting. Configured topics=%d, hass state=%s",
             len(self._config),
