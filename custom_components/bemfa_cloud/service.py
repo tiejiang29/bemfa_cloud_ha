@@ -132,8 +132,9 @@ class BemfaCloudService:
         We need to:
           1. capture the old effective topic (for TCP unsubscribe)
           2. apply the new config (which changes `topic_suffix` / `topic`)
-          3. create the new topic on Bemfa cloud
-          4. re-subscribe on the TCP long connection
+          3. delete the OLD topic from Bemfa Cloud (best effort)
+          4. create the NEW topic on Bemfa cloud
+          5. re-subscribe on the TCP long connection
         The persistent config key (`default_topic`) is unchanged.
         """
 
@@ -156,6 +157,17 @@ class BemfaCloudService:
             # Unsubscribe the old effective topic and re-subscribe the new one.
             if old_topic != new_topic:
                 await self._tcp.async_remove_sync(old_topic)
+                # Best-effort cloud-side delete of the OLD topic so it does
+                # not pile up as an orphan on the Bemfa console.
+                try:
+                    await self._http.async_delete_topic(old_topic)
+                except Exception as err:  # noqa: BLE001
+                    LOGGER.warning(
+                        "Failed to delete old Bemfa cloud topic %s after type "
+                        "change: %s. You may need to remove it manually.",
+                        old_topic,
+                        err,
+                    )
                 await self._ensure_topics([sync])
                 await self._tcp.async_add_sync(sync)
             else:
@@ -170,13 +182,25 @@ class BemfaCloudService:
         await self._tcp.async_update_sync(sync)
         self._syncs_by_entity_id[sync.entity_id] = sync
 
+    async def async_delete_cloud_topic(self, topic: str) -> None:
+        """Delete a single topic from Bemfa Cloud.
+
+        Thin wrapper around `BemfaCloudHttp.async_delete_topic` so config_flow
+        can call it without touching the HTTP client directly. Best-effort:
+        callers should catch and log exceptions.
+        """
+
+        await self._http.async_delete_topic(topic)
+
     async def async_destroy_sync(self, topic: str) -> None:
-        """Remove a local sync.
+        """Remove a local sync AND delete its topic from Bemfa Cloud.
 
         `topic` here is the *default_topic* (the stable config key)
         shown in the destroy menu. We need to find the corresponding
-        sync, unsubscribe its *effective* topic from TCP, and drop the
-        config entry.
+        sync, unsubscribe its *effective* topic from TCP, delete the
+        *effective* topic from Bemfa Cloud, and drop the config entry.
+        Cloud-deletion is best-effort — failures are logged but do not
+        block local cleanup.
         """
 
         # Find the sync whose default_topic matches the one the user picked.
@@ -187,9 +211,20 @@ class BemfaCloudService:
                 break
 
         if target_sync is not None:
+            effective_topic = target_sync.topic
             # Unsubscribe the *effective* topic (which may differ from
             # default_topic if the user set a type override).
-            await self._tcp.async_remove_sync(target_sync.topic)
+            await self._tcp.async_remove_sync(effective_topic)
+            # Best-effort cloud-side delete.
+            try:
+                await self._http.async_delete_topic(effective_topic)
+            except Exception as err:  # noqa: BLE001
+                LOGGER.warning(
+                    "Failed to delete Bemfa cloud topic %s: %s. "
+                    "You may need to remove it manually in the Bemfa console.",
+                    effective_topic,
+                    err,
+                )
             self._syncs_by_entity_id = {
                 entity_id: sync
                 for entity_id, sync in self._syncs_by_entity_id.items()

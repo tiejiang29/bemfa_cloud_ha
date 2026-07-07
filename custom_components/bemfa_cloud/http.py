@@ -15,6 +15,7 @@ from .const import (
     CHANGE_TOPIC_ROOM_URL,
     CONF_UID,
     CREATE_TOPIC_URL,
+    DELETE_TOPIC_URL,
     LOGGER,
     MODIFY_TOPIC_NAME_URL,
 )
@@ -118,6 +119,76 @@ class BemfaCloudHttp:
                     "room": room,
                 },
             )
+
+    async def async_delete_topic(self, topic: str) -> None:
+        """Delete a single topic from Bemfa Cloud.
+
+        Uses the legacy `pro.bemfa.com/v1/deleteTopic` endpoint because
+        Bemfa has not published a NoSecret variant for delete (the NoSecret
+        family is create-only).
+
+        The `type` field MUST match the type used at creation. This plugin
+        always creates with type=7 (TCP V2), so we delete with type=7 too.
+
+        Idempotent: if the topic is already gone (Bemfa returns business
+        code 40004 = "uid or topic error"), we treat that as success and do
+        not raise — the desired end state (topic gone) is already achieved.
+        """
+
+        await self._post_delete(
+            DELETE_TOPIC_URL,
+            {
+                "uid": self._uid,
+                "topic": topic,
+                "type": BEMFA_TOPIC_TYPE_TCP_V2,
+            },
+        )
+
+    async def _post_delete(self, url: str, payload: dict[str, Any]) -> None:
+        """POST helper specialized for the delete endpoint.
+
+        The delete endpoint returns a flat response shape
+        `{"code": 0, "message": "OK", "data": 0}` — `data` is an integer
+        (or null), NOT a nested business object like the NoSecret create
+        endpoints. So we cannot reuse `_post()` which expects a nested
+        `data.code`.
+
+        Business codes:
+          0     = success
+          40004 = uid/topic error (= topic doesn't exist or not owned by
+                  this uid) — treat as idempotent success
+          10002 = bad request parameters — real error
+          40000 = unknown error — real error
+        """
+
+        async with self._session.post(url, json=payload, timeout=30) as response:
+            try:
+                data = await response.json(content_type=None)
+            except ValueError:
+                # Response was not JSON — treat as a transport error.
+                text = await response.text()
+                raise BemfaCloudApiError(
+                    f"Non-JSON response (HTTP {response.status}): {text[:200]}"
+                )
+
+        if response.status >= 400:
+            raise BemfaCloudApiError(f"HTTP {response.status}: {data}")
+
+        # `data` is now guaranteed to be a parsed JSON dict.
+        # `None` here means the key was explicitly null, which we treat as
+        # success (the API sometimes returns null code on success).
+        code = data.get("code") if isinstance(data, dict) else None
+        if code == 0 or code is None:
+            return
+        if code == 40004:
+            # Topic doesn't exist or not owned by this uid — the desired
+            # end state (topic gone) is already true, so this is a success.
+            LOGGER.info(
+                "Bemfa topic %s not found on cloud (code 40004) — treat as deleted",
+                payload.get("topic"),
+            )
+            return
+        raise BemfaCloudApiError(str(data.get("message") if isinstance(data, dict) else data))
 
     async def _post(self, url: str, payload: dict[str, Any]) -> None:
         async with self._session.post(url, json=payload, timeout=30) as response:

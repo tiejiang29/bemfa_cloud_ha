@@ -78,7 +78,7 @@
       },
       "destroy_sync": {
         "title": "Remove local sync",
-        "description": "This only stops this integration from syncing the selected topics. It does not delete topics from Bemfa Cloud. If you changed a device type, the old topic is also left on Bemfa Cloud and must be deleted manually in the Bemfa console.",
+        "description": "Removes the local sync AND deletes the corresponding topic from Bemfa Cloud, so no manual cleanup is needed. If the cloud deletion fails (e.g. network error), the local sync is still removed and a warning is logged — you can then delete the topic manually in the Bemfa console.",
         "data": {
           "select": "Topics"
         }

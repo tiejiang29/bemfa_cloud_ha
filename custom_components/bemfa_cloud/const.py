@@ -101,6 +101,7 @@ TCP_RESUBSCRIBE_INTERVAL: Final = 5 * 60
 BEMFA_TOPIC_TYPE_TCP_V2: Final = 7
 CREATE_TOPIC_URL: Final = "https://pro.bemfa.com/vs/web/v2/createTopicNoSecret"
 ADD_TOPICS_URL: Final = "https://pro.bemfa.com/vs/web/v2/addTopicsNoSecret"
+DELETE_TOPIC_URL: Final = "https://pro.bemfa.com/v1/deleteTopic"
 CHANGE_TOPIC_GROUP_URL: Final = "http://apis.bemfa.com/vb/api/v1/changeTopicGroup"
 CHANGE_TOPIC_ROOM_URL: Final = "http://apis.bemfa.com/vb/api/v1/changeTopicRoom"
 MODIFY_TOPIC_NAME_URL: Final = "https://apis.bemfa.com/va/modifyName"

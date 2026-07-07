@@ -546,10 +546,43 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
     async def async_step_destroy_sync(
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
-        """Destroy local syncs."""
+        """Destroy local syncs.
+
+        For each topic the user selected, we:
+          1. Look up the corresponding sync to determine the *effective* topic
+             (which may differ from the default_topic key if a type override
+             is set).
+          2. Call Bemfa Cloud to delete that topic from the cloud too — so
+             the user does not have to clean up manually in the Bemfa console.
+          3. Drop the local config entry.
+        Cloud-deletion failures are logged but do not block local cleanup;
+        the user can still delete the topic manually in the Bemfa console.
+        """
 
         if user_input is not None:
+            service = self._get_service()
+            # Build a lookup from default_topic -> sync so we can resolve the
+            # *effective* topic (which may differ when a type override is set).
+            syncs_by_default_topic = {
+                sync.default_topic: sync
+                for sync in service.collect_supported_syncs()
+                if sync.default_topic in self._config
+            }
+
             for topic in user_input[OPTIONS_SELECT]:
+                # Cloud-side delete (best effort, non-blocking on failure).
+                sync = syncs_by_default_topic.get(topic)
+                if sync is not None:
+                    effective_topic = sync.topic
+                    try:
+                        await service.async_delete_cloud_topic(effective_topic)
+                    except Exception as err:  # noqa: BLE001
+                        LOGGER.warning(
+                            "Failed to delete Bemfa cloud topic %s: %s. "
+                            "You may need to remove it manually in the Bemfa console.",
+                            effective_topic,
+                            err,
+                        )
                 self._config.pop(topic, None)
             return self.async_create_entry(title="", data={OPTIONS_CONFIG: self._config})
 
