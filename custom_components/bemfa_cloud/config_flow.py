@@ -414,7 +414,7 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
             syncs = [self._sync_dict[entity_id] for entity_id in user_input[OPTIONS_SELECT]]
             for sync in syncs:
                 sync.config = {OPTIONS_NAME: sync.name}
-                self._config[sync.topic] = sync.config.copy()
+                self._config[sync.default_topic] = sync.config.copy()
             return self.async_create_entry(title="", data={OPTIONS_CONFIG: self._config})
 
         self._sync_dict = self._collect_batchable_syncs()
@@ -484,8 +484,8 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
 
     async def _async_step_sync_config(self) -> FlowResult:
         assert self._sync is not None
-        if self._sync.topic in self._config:
-            self._sync.config = self._config[self._sync.topic].copy()
+        if self._sync.default_topic in self._config:
+            self._sync.config = self._config[self._sync.default_topic].copy()
             self._sync.name = self._sync.config.get(OPTIONS_NAME, self._sync.name)
         return self.async_show_form(
             step_id=self._sync.get_config_step_id(),
@@ -537,7 +537,10 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
 
         self._sync.name = user_input.get(OPTIONS_NAME, self._sync.name)
         self._sync.config = user_input.copy()
-        self._config[self._sync.topic] = self._sync.config.copy()
+        # Store under the stable default_topic key so that future type
+        # overrides (which change the *effective* topic) do not orphan
+        # the stored config.
+        self._config[self._sync.default_topic] = self._sync.config.copy()
         return self.async_create_entry(title="", data={OPTIONS_CONFIG: self._config})
 
     async def async_step_destroy_sync(
@@ -581,7 +584,7 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
         return {
             sync.entity_id: sync
             for sync in self._get_service().collect_supported_syncs()
-            if sync.topic not in self._config
+            if sync.default_topic not in self._config
         }
 
     def _collect_batchable_syncs(self) -> dict[str, Sync]:
@@ -619,8 +622,8 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
     def _collect_configured_syncs(self) -> dict[str, Sync]:
         result = {}
         for sync in self._get_service().collect_supported_syncs():
-            if sync.topic in self._config:
-                sync.config = self._config[sync.topic].copy()
+            if sync.default_topic in self._config:
+                sync.config = self._config[sync.default_topic].copy()
                 sync.name = sync.config.get(OPTIONS_NAME, sync.name)
                 result[sync.entity_id] = sync
         return result

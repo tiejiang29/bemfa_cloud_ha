@@ -32,6 +32,11 @@ OPTIONS_CONFIG: Final = "config"
 OPTIONS_SELECT: Final = "select"
 OPTIONS_NAME: Final = "name"
 
+# Type override key. When present in a sync's config dict, the sync will
+# publish / subscribe as the chosen Bemfa device type instead of the type
+# implied by the HA domain. Value is the 3-digit TopicSuffix string.
+OPTIONS_DEVICE_TYPE: Final = "device_type"
+
 OPTIONS_TEMPERATURE: Final = "temperature"
 OPTIONS_HUMIDITY: Final = "humidity"
 OPTIONS_ILLUMINANCE: Final = "illuminance"
@@ -68,6 +73,22 @@ class TopicSuffix(StrEnum):
     WATER_HEATER = "011"
     TV = "012"
     AIR_PURIFIER = "013"
+
+
+# Bemfa device types that users may manually pick as an override target.
+# Limited to the 7 base types that Bemfa voice assistants (Xiaoai / Tmall /
+# Xiaodu) reliably recognize. Newer types (010/011/012/013) are left out
+# because they require domain-specific attributes that a generic override
+# cannot supply.
+OVERRIDABLE_TOPIC_SUFFIXES: Final = (
+    TopicSuffix.OUTLET,    # 001 插座
+    TopicSuffix.LIGHT,     # 002 灯
+    TopicSuffix.FAN,       # 003 风扇
+    TopicSuffix.SENSOR,    # 004 传感器
+    TopicSuffix.CLIMATE,   # 005 空调
+    TopicSuffix.SWITCH,    # 006 开关
+    TopicSuffix.COVER,     # 009 窗帘
+)
 
 
 TCP_HOST: Final = "tcp-cn-03.bemfa.com"

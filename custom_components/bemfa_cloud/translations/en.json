@@ -78,7 +78,7 @@
       },
       "destroy_sync": {
         "title": "Remove local sync",
-        "description": "This only stops this integration from syncing the selected topics. It does not delete topics from Bemfa Cloud.",
+        "description": "This only stops this integration from syncing the selected topics. It does not delete topics from Bemfa Cloud. If you changed a device type, the old topic is also left on Bemfa Cloud and must be deleted manually in the Bemfa console.",
         "data": {
           "select": "Topics"
         }
@@ -89,19 +89,22 @@
       "sync_config_sensor": {
         "title": "Configure sensor",
         "data": {
-          "name": "Name"
+          "name": "Name",
+          "device_type": "Bemfa device type (override)"
         }
       },
       "sync_config_binary_sensor": {
         "title": "Configure binary sensor",
         "data": {
-          "name": "Name"
+          "name": "Name",
+          "device_type": "Bemfa device type (override)"
         }
       },
       "sync_config_climate": {
         "title": "Configure climate",
         "data": {
           "name": "Name",
+          "device_type": "Bemfa device type (override)",
           "fan_speed_0_value": "Auto fan",
           "fan_speed_1_value": "Fan speed 1",
           "fan_speed_2_value": "Fan speed 2",
@@ -120,55 +123,64 @@
       "sync_config_cover": {
         "title": "Configure cover",
         "data": {
-          "name": "Name"
+          "name": "Name",
+          "device_type": "Bemfa device type (override)"
         }
       },
       "sync_config_fan": {
         "title": "Configure fan",
         "data": {
-          "name": "Name"
+          "name": "Name",
+          "device_type": "Bemfa device type (override)"
         }
       },
       "sync_config_light": {
         "title": "Configure light",
         "data": {
-          "name": "Name"
+          "name": "Name",
+          "device_type": "Bemfa device type (override)"
         }
       },
       "sync_config_switch": {
         "title": "Configure switch",
         "data": {
-          "name": "Name"
+          "name": "Name",
+          "device_type": "Bemfa device type (override)"
         }
       },
       "sync_config_outlet": {
         "title": "Configure outlet",
         "data": {
-          "name": "Name"
+          "name": "Name",
+          "device_type": "Bemfa device type (override)"
         }
       },
       "sync_config_thermostat": {
         "title": "Configure thermostat",
         "data": {
-          "name": "Name"
+          "name": "Name",
+          "device_type": "Bemfa device type (override)"
         }
       },
       "sync_config_water_heater": {
         "title": "Configure water heater",
         "data": {
-          "name": "Name"
+          "name": "Name",
+          "device_type": "Bemfa device type (override)"
         }
       },
       "sync_config_tv": {
         "title": "Configure TV",
         "data": {
-          "name": "Name"
+          "name": "Name",
+          "device_type": "Bemfa device type (override)"
         }
       },
       "sync_config_air_purifier": {
         "title": "Configure air purifier",
         "data": {
-          "name": "Name"
+          "name": "Name",
+          "device_type": "Bemfa device type (override)"
         }
       }
     }

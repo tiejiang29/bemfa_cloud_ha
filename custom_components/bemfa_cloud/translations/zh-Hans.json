@@ -78,7 +78,7 @@
       },
       "destroy_sync": {
         "title": "移除本地同步",
-        "description": "只会停止此集成继续同步所选主题，不会删除巴法云云端主题。",
+        "description": "只会停止此集成继续同步所选主题，不会删除巴法云云端主题。如果你修改过设备类型，旧的主题也会保留在巴法云云端，需要手动到巴法云控制台删除。",
         "data": {
           "select": "主题"
         }
@@ -89,19 +89,22 @@
       "sync_config_sensor": {
         "title": "配置传感器",
         "data": {
-          "name": "名称"
+          "name": "名称",
+          "device_type": "巴法云设备类型（覆盖）"
         }
       },
       "sync_config_binary_sensor": {
         "title": "配置二元传感器",
         "data": {
-          "name": "名称"
+          "name": "名称",
+          "device_type": "巴法云设备类型（覆盖）"
         }
       },
       "sync_config_climate": {
         "title": "配置空调",
         "data": {
           "name": "名称",
+          "device_type": "巴法云设备类型（覆盖）",
           "fan_speed_0_value": "自动风速",
           "fan_speed_1_value": "一档风速",
           "fan_speed_2_value": "二档风速",
@@ -120,55 +123,64 @@
       "sync_config_cover": {
         "title": "配置窗帘",
         "data": {
-          "name": "名称"
+          "name": "名称",
+          "device_type": "巴法云设备类型（覆盖）"
         }
       },
       "sync_config_fan": {
         "title": "配置风扇",
         "data": {
-          "name": "名称"
+          "name": "名称",
+          "device_type": "巴法云设备类型（覆盖）"
         }
       },
       "sync_config_light": {
         "title": "配置灯",
         "data": {
-          "name": "名称"
+          "name": "名称",
+          "device_type": "巴法云设备类型（覆盖）"
         }
       },
       "sync_config_switch": {
         "title": "配置开关",
         "data": {
-          "name": "名称"
+          "name": "名称",
+          "device_type": "巴法云设备类型（覆盖）"
         }
       },
       "sync_config_outlet": {
         "title": "配置插座",
         "data": {
-          "name": "名称"
+          "name": "名称",
+          "device_type": "巴法云设备类型（覆盖）"
         }
       },
       "sync_config_thermostat": {
         "title": "配置温控器",
         "data": {
-          "name": "名称"
+          "name": "名称",
+          "device_type": "巴法云设备类型（覆盖）"
         }
       },
       "sync_config_water_heater": {
         "title": "配置热水器",
         "data": {
-          "name": "名称"
+          "name": "名称",
+          "device_type": "巴法云设备类型（覆盖）"
         }
       },
       "sync_config_tv": {
         "title": "配置电视",
         "data": {
-          "name": "名称"
+          "name": "名称",
+          "device_type": "巴法云设备类型（覆盖）"
         }
       },
       "sync_config_air_purifier": {
         "title": "配置空气净化器",
         "data": {
-          "name": "名称"
+          "name": "名称",
+          "device_type": "巴法云设备类型（覆盖）"
         }
       }
     }

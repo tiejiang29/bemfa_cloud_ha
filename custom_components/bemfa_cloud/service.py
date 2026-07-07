@@ -54,9 +54,11 @@ class BemfaCloudService:
     async def _async_restore_syncs(self) -> None:
         syncs = []
         for sync in self.collect_supported_syncs():
-            if sync.topic not in self._config:
+            # `default_topic` is the stable key under which config is stored.
+            # It does NOT change when the user overrides the device type.
+            if sync.default_topic not in self._config:
                 continue
-            sync.config = self._config.get(sync.topic, {OPTIONS_NAME: sync.name}).copy()
+            sync.config = self._config.get(sync.default_topic, {OPTIONS_NAME: sync.name}).copy()
             sync.name = sync.config.get(OPTIONS_NAME, sync.name)
             syncs.append(sync)
 
@@ -123,23 +125,78 @@ class BemfaCloudService:
         self._syncs_by_entity_id.update({sync.entity_id: sync for sync in syncs})
 
     async def async_modify_sync(self, sync: Sync, user_input: dict[str, str]) -> None:
-        """Modify sync configuration and publish the latest state."""
+        """Modify sync configuration and publish the latest state.
+
+        If the user changed the device type override, the sync's effective
+        Bemfa topic changes (because the topic embeds the 3-digit suffix).
+        We need to:
+          1. capture the old effective topic (for TCP unsubscribe)
+          2. apply the new config (which changes `topic_suffix` / `topic`)
+          3. create the new topic on Bemfa cloud
+          4. re-subscribe on the TCP long connection
+        The persistent config key (`default_topic`) is unchanged.
+        """
+
+        from .const import OPTIONS_DEVICE_TYPE
+
+        old_topic = sync.topic
+        old_override = sync.config.get(OPTIONS_DEVICE_TYPE) if sync.config else ""
 
         sync.name = user_input.get(OPTIONS_NAME, sync.name)
         sync.config = user_input.copy()
+        new_override = sync.config.get(OPTIONS_DEVICE_TYPE, "")
+
+        # Empty string means "auto" (use the HA-domain-implied suffix).
+        type_changed = (old_override or "") != (new_override or "")
+
+        if type_changed:
+            new_topic = sync.topic
+            # Update the stored config under the stable default_topic key.
+            self._config[sync.default_topic] = sync.config.copy()
+            # Unsubscribe the old effective topic and re-subscribe the new one.
+            if old_topic != new_topic:
+                await self._tcp.async_remove_sync(old_topic)
+                await self._ensure_topics([sync])
+                await self._tcp.async_add_sync(sync)
+            else:
+                # Override resolved to the same suffix as the default — no
+                # topic change, just publish the latest state.
+                await self._tcp.async_update_sync(sync)
+            self._syncs_by_entity_id[sync.entity_id] = sync
+            return
+
+        self._config[sync.default_topic] = sync.config.copy()
         await self._ensure_topics([sync])
         await self._tcp.async_update_sync(sync)
         self._syncs_by_entity_id[sync.entity_id] = sync
 
     async def async_destroy_sync(self, topic: str) -> None:
-        """Remove a local sync."""
+        """Remove a local sync.
 
-        self._syncs_by_entity_id = {
-            entity_id: sync
-            for entity_id, sync in self._syncs_by_entity_id.items()
-            if sync.topic != topic
-        }
-        await self._tcp.async_remove_sync(topic)
+        `topic` here is the *default_topic* (the stable config key)
+        shown in the destroy menu. We need to find the corresponding
+        sync, unsubscribe its *effective* topic from TCP, and drop the
+        config entry.
+        """
+
+        # Find the sync whose default_topic matches the one the user picked.
+        target_sync: Sync | None = None
+        for sync in list(self._syncs_by_entity_id.values()):
+            if sync.default_topic == topic:
+                target_sync = sync
+                break
+
+        if target_sync is not None:
+            # Unsubscribe the *effective* topic (which may differ from
+            # default_topic if the user set a type override).
+            await self._tcp.async_remove_sync(target_sync.topic)
+            self._syncs_by_entity_id = {
+                entity_id: sync
+                for entity_id, sync in self._syncs_by_entity_id.items()
+                if sync.entity_id != target_sync.entity_id
+            }
+
+        self._config.pop(topic, None)
 
     async def _ensure_topics(self, syncs: list[Sync]) -> None:
         await self._http.async_create_topics(
