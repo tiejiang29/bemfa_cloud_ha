@@ -411,13 +411,94 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
         """Create many syncs at once."""
 
         if user_input is not None:
-            syncs = [self._sync_dict[entity_id] for entity_id in user_input[OPTIONS_SELECT]]
+            selected = user_input.get(OPTIONS_SELECT, [])
+            LOGGER.info(
+                "Bemfa Cloud create_all_syncs: user submitted. "
+                "OPTIONS_SELECT=%s (type=%s, len=%s), sync_dict has %d entries",
+                selected, type(selected).__name__,
+                len(selected) if isinstance(selected, list) else "N/A",
+                len(self._sync_dict),
+            )
+
+            if not selected:
+                LOGGER.warning(
+                    "Bemfa Cloud create_all_syncs: OPTIONS_SELECT is empty or missing. "
+                    "Full user_input keys=%s, full user_input=%s",
+                    list(user_input.keys()), user_input,
+                )
+                # Re-show the form so the user can try again
+                if not self._sync_dict:
+                    self._sync_dict = self._collect_batchable_syncs()
+                return self.async_show_form(
+                    step_id="create_all_syncs",
+                    data_schema=self._create_all_syncs_schema(),
+                    errors={"base": "no_selection"},
+                )
+
+            # Convert single string to list (defensive — SelectSelector
+            # sometimes returns a string even with multiple=True in some
+            # HA versions)
+            if isinstance(selected, str):
+                selected = [selected]
+                LOGGER.info(
+                    "Bemfa Cloud create_all_syncs: converted string to list: %s",
+                    selected,
+                )
+
+            # Resolve each entity_id to its sync. Log any that are missing
+            # from self._sync_dict so we can diagnose the KeyError case.
+            syncs = []
+            missing = []
+            for entity_id in selected:
+                sync = self._sync_dict.get(entity_id)
+                if sync is None:
+                    missing.append(entity_id)
+                else:
+                    syncs.append(sync)
+
+            if missing:
+                LOGGER.error(
+                    "Bemfa Cloud create_all_syncs: %d selected entity_ids not found "
+                    "in sync_dict (which has %d entries). Missing: %s. "
+                    "Available keys sample: %s",
+                    len(missing), len(self._sync_dict), missing,
+                    list(self._sync_dict.keys())[:5],
+                )
+
+            if not syncs:
+                LOGGER.error(
+                    "Bemfa Cloud create_all_syncs: 0 syncs resolved from selection. "
+                    "Not saving config (would be empty)."
+                )
+                if not self._sync_dict:
+                    self._sync_dict = self._collect_batchable_syncs()
+                return self.async_show_form(
+                    step_id="create_all_syncs",
+                    data_schema=self._create_all_syncs_schema(),
+                    errors={"base": "no_selection"},
+                )
+
             for sync in syncs:
                 sync.config = {OPTIONS_NAME: sync.name}
                 self._config[sync.default_topic] = sync.config.copy()
+                LOGGER.info(
+                    "Bemfa Cloud create_all_syncs: saving config for entity=%s "
+                    "default_topic=%s name=%s",
+                    sync.entity_id, sync.default_topic, sync.name,
+                )
+
+            LOGGER.info(
+                "Bemfa Cloud create_all_syncs: saving %d syncs to config entry options. "
+                "Total config keys after save: %d",
+                len(syncs), len(self._config),
+            )
             return self.async_create_entry(title="", data={OPTIONS_CONFIG: self._config})
 
         self._sync_dict = self._collect_batchable_syncs()
+        LOGGER.info(
+            "Bemfa Cloud create_all_syncs: showing form with %d selectable syncs",
+            len(self._sync_dict),
+        )
         if not self._sync_dict:
             return self.async_show_form(step_id="empty", last_step=False)
 

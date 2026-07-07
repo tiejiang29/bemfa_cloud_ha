@@ -53,7 +53,8 @@
   },
   "options": {
     "error": {
-      "cannot_sync": "Failed to sync to Bemfa Cloud. Check that the private key is correct, the network is reachable, and see the Home Assistant logs for details."
+      "cannot_sync": "Failed to sync to Bemfa Cloud. Check that the private key is correct, the network is reachable, and see the Home Assistant logs for details.",
+      "no_selection": "No entities selected. Please select at least one entity and submit again."
     },
     "step": {
       "init": {

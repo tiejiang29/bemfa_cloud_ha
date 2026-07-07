@@ -45,7 +45,8 @@
   },
   "options": {
     "error": {
-      "cannot_sync": "同步到巴法云失败，请检查私钥是否正确、网络是否可访问，并查看 Home Assistant 日志中的详细错误。"
+      "cannot_sync": "同步到巴法云失败，请检查私钥是否正确、网络是否可访问，并查看 Home Assistant 日志中的详细错误。",
+      "no_selection": "没有选中任何实体。请至少勾选一个实体后重新提交。"
     },
     "step": {
       "init": {
