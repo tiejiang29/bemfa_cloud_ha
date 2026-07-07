@@ -197,17 +197,37 @@ class BemfaCloudHttp:
             except ValueError:
                 data = {"raw": await response.text()}
 
+        # Log the raw response at debug level so we can diagnose silent
+        # failures where Bemfa returns an unexpected shape.
+        LOGGER.debug(
+            "Bemfa API %s payload=%s response_status=%s response_body=%s",
+            url, payload, response.status, data,
+        )
+
         if response.status >= 400:
             raise BemfaCloudApiError(f"HTTP {response.status}: {data}")
 
-        if data.get("code") not in (0, None):
-            raise BemfaCloudApiError(str(data.get("msg") or data))
+        # Bemfa uses `code` at the top level for the transport status.
+        # 0 = OK, None = some endpoints omit it, anything else = error.
+        code = data.get("code")
+        if code not in (0, None):
+            raise BemfaCloudApiError(
+                f"Bemfa API error (code={code}): {data.get('msg') or data.get('message') or data}"
+            )
 
-        business = data.get("data") if isinstance(data.get("data"), dict) else {}
-        business_code = business.get("code", 0)
-        if business_code in (0, 40006):
+        # Some endpoints (createTopicNoSecret / addTopicsNoSecret) wrap a
+        # business-level code inside `data`. Others return `data` as a
+        # string, integer, or null — in which case there is no business
+        # code to check and we treat the call as successful.
+        raw_data = data.get("data")
+        if isinstance(raw_data, dict):
+            business_code = raw_data.get("code", 0)
             if business_code == 40006:
                 LOGGER.debug("Bemfa topic already exists: %s", payload)
-            return
-
-        raise BemfaCloudApiError(str(business.get("message") or data))
+                return
+            if business_code != 0:
+                raise BemfaCloudApiError(
+                    f"Bemfa business error (code={business_code}): "
+                    f"{raw_data.get('message') or data}"
+                )
+        # `data` is not a dict — no business code to check, transport was OK.

@@ -52,19 +52,64 @@ class BemfaCloudService:
         await self._tcp.async_stop()
 
     async def _async_restore_syncs(self) -> None:
+        LOGGER.info(
+            "Bemfa Cloud restore: starting. Configured topics=%d, hass state=%s",
+            len(self._config),
+            self._hass.state,
+        )
         syncs = []
-        for sync in self.collect_supported_syncs():
+        all_collected = self.collect_supported_syncs()
+        LOGGER.info(
+            "Bemfa Cloud restore: collected %d candidate syncs from HA",
+            len(all_collected),
+        )
+        for sync in all_collected:
             # `default_topic` is the stable key under which config is stored.
             # It does NOT change when the user overrides the device type.
             if sync.default_topic not in self._config:
+                LOGGER.debug(
+                    "Bemfa Cloud restore: skip %s (default_topic=%s not in config)",
+                    sync.entity_id, sync.default_topic,
+                )
                 continue
             sync.config = self._config.get(sync.default_topic, {OPTIONS_NAME: sync.name}).copy()
             sync.name = sync.config.get(OPTIONS_NAME, sync.name)
+            LOGGER.info(
+                "Bemfa Cloud restore: will create topic=%s name=%s for entity=%s",
+                sync.topic, sync.name, sync.entity_id,
+            )
             syncs.append(sync)
 
-        await self._ensure_topics(syncs)
-        await self._tcp.async_add_syncs(syncs)
+        if not syncs:
+            LOGGER.warning(
+                "Bemfa Cloud restore: 0 syncs matched. Config keys=%s, "
+                "collected default_topics=%s",
+                list(self._config.keys()),
+                [s.default_topic for s in all_collected],
+            )
+            return
+
+        try:
+            await self._ensure_topics(syncs)
+            LOGGER.info("Bemfa Cloud restore: _ensure_topics succeeded for %d syncs", len(syncs))
+        except Exception as err:  # noqa: BLE001
+            LOGGER.error(
+                "Bemfa Cloud restore: _ensure_topics FAILED for %d syncs: %s. "
+                "Topics that should have been created: %s",
+                len(syncs), err,
+                [(s.topic, s.name) for s in syncs],
+            )
+            raise
+
+        try:
+            await self._tcp.async_add_syncs(syncs)
+            LOGGER.info("Bemfa Cloud restore: TCP subscribe succeeded for %d syncs", len(syncs))
+        except Exception as err:  # noqa: BLE001
+            LOGGER.error("Bemfa Cloud restore: TCP subscribe FAILED: %s", err)
+            raise
+
         self._syncs_by_entity_id = {sync.entity_id: sync for sync in syncs}
+        LOGGER.info("Bemfa Cloud restore: done, %d syncs active", len(self._syncs_by_entity_id))
 
     def collect_supported_syncs(self) -> list[Sync]:
         """Collect all supported HA syncs."""
@@ -234,12 +279,20 @@ class BemfaCloudService:
         self._config.pop(topic, None)
 
     async def _ensure_topics(self, syncs: list[Sync]) -> None:
-        await self._http.async_create_topics(
-            [
-                TopicPayload(topic=sync.topic, name=sync.name, room=self._sync_room(sync))
-                for sync in syncs
-            ]
+        if not syncs:
+            LOGGER.info("Bemfa Cloud _ensure_topics: no syncs to create, skipping")
+            return
+        payloads = [
+            TopicPayload(topic=sync.topic, name=sync.name, room=self._sync_room(sync))
+            for sync in syncs
+        ]
+        LOGGER.info(
+            "Bemfa Cloud _ensure_topics: creating %d topics: %s",
+            len(payloads),
+            [(p.topic, p.name) for p in payloads],
         )
+        await self._http.async_create_topics(payloads)
+        LOGGER.info("Bemfa Cloud _ensure_topics: API call returned successfully")
 
     def _start_registry_listeners(self) -> None:
         """Listen for HA name and area changes and mirror them to Bemfa."""
