@@ -397,9 +397,26 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
         self._sync: Sync | None = None
         self._is_create = True
 
+        LOGGER.info(
+            "Bemfa Cloud OptionsFlowHandler __init__: entry_id=%s, "
+            "entry.options keys=%s, entry.options=%s, "
+            "OPTIONS_CONFIG extracted=%s (type=%s, len=%s)",
+            self._entry_id,
+            list(config_entry.options.keys()),
+            dict(config_entry.options),
+            self._config,
+            type(self._config).__name__,
+            len(self._config) if isinstance(self._config, dict) else "N/A",
+        )
+
     async def async_step_init(self, user_input: dict[str, Any] | None = None) -> FlowResult:
         """Show option menu."""
 
+        LOGGER.info(
+            "Bemfa Cloud flow: async_step_init called. user_input=%s, "
+            "current config has %d keys",
+            user_input, len(self._config),
+        )
         return self.async_show_menu(
             step_id="init",
             menu_options=["create_all_syncs", "create_sync", "modify_sync", "destroy_sync"],
@@ -410,7 +427,24 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
     ) -> FlowResult:
         """Create many syncs at once."""
 
+        # ALWAYS log entry into this step, regardless of user_input
+        LOGGER.info(
+            "Bemfa Cloud flow: async_step_create_all_syncs ENTERED. "
+            "user_input is %s, user_input value=%s, sync_dict has %d entries, "
+            "config has %d keys",
+            "NOT None" if user_input is not None else "None",
+            user_input,
+            len(self._sync_dict),
+            len(self._config),
+        )
+
         if user_input is not None:
+            # Dump ALL keys in user_input so we can see what HA actually sent
+            LOGGER.info(
+                "Bemfa Cloud flow: user_input ALL keys=%s, ALL values=%s",
+                list(user_input.keys()),
+                {k: (str(v)[:100] + '...' if len(str(v)) > 100 else v) for k, v in user_input.items()},
+            )
             selected = user_input.get(OPTIONS_SELECT, [])
             LOGGER.info(
                 "Bemfa Cloud create_all_syncs: user submitted. "
