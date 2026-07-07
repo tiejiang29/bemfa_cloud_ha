@@ -1,6 +1,7 @@
 {
-  "name": "Bemfa Cloud",
+  "name": "Bemfa Cloud (Type Override Fork)",
   "render_readme": true,
   "country": "CN",
-  "homeassistant": "2024.6.0"
+  "homeassistant": "2024.6.0",
+  "hide_default_branch": false
 }

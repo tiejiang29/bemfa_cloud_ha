@@ -1,4 +1,4 @@
-# Bemfa Cloud Home Assistant 集成
+# Bemfa Cloud Home Assistant 集成（Type Override Fork）
 
 [![GitHub Release][releases-shield]][releases]
 [![GitHub Activity][commits-shield]][commits]
@@ -9,9 +9,24 @@
 
 _将 Home Assistant 中的设备同步到巴法云。_
 
+**这是 [`bemfa/bemfa_cloud_ha`](https://github.com/bemfa/bemfa_cloud_ha) 的 fork，额外增加了设备类型覆盖（type override）和自动删除云端主题功能。**
+
 **Bemfa Cloud 会把 HA 里的本地实体映射为巴法云 TCP V2 设备，让用户可以通过巴法云、小爱同学等入口控制 HA 设备。**
 
 简体中文 | [English](README_en.md)
+
+## Fork 特性（相比官方版本）
+
+| 特性 | 官方版本 | 本 Fork |
+| --- | --- | --- |
+| 设备类型覆盖 | ❌ | ✅ 可手动把任意实体映射为任意巴法云设备类型（如 switch → 灯） |
+| 移除本地同步时删云端 topic | ❌ 需手动清理 | ✅ 自动调用巴法云 API 删除 |
+| 修改类型时删旧云端 topic | N/A | ✅ 自动调用巴法云 API 删除 |
+| 反回声机制 | ✅ | ✅ 保留 |
+| 名称/房间镜像 | ✅ | ✅ 保留 |
+| Stable Topic ID | ✅ | ✅ 保留 |
+| BeHome 防环 | ✅ | ✅ 保留 |
+| 3 种认证（私钥/微信扫码/OAuth） | ✅ | ✅ 保留 |
 
 ## 功能特性
 
@@ -24,6 +39,7 @@ _将 Home Assistant 中的设备同步到巴法云。_
 - **同步关系更稳定**：修改实体昵称或房间后，通常不会重复创建巴法云设备
 - **来源过滤**：自动跳过 BeHome 生成的 HA 实体，避免把巴法云设备再次同步回巴法云
 - **设备类型覆盖（v0.1.6 新增）**：可手动把任意实体映射为任意巴法云设备类型，例如把 `switch` 映射为灯（`002`），让小爱同学"关全部灯"语音指令能联动到智能插座上的灯
+- **自动删除云端 topic（v0.1.6.2 新增）**：移除本地同步或修改类型时，自动调用巴法云 API 删除对应的云端 topic，无需手动去巴法云控制台清理
 
 ## 支持的设备类型
 
@@ -43,30 +59,48 @@ _将 Home Assistant 中的设备同步到巴法云。_
 
 ## 安装方法
 
-### HACS 安装（推荐）
+### HACS 自定义仓库安装（推荐）
 
-1. 在 Home Assistant 中打开 HACS
-2. 进入 **集成**
-3. 点击 **浏览和下载存储库**
-4. 搜索 **Bemfa Cloud**
-5. 下载并重启 Home Assistant
+本 fork 未提交到 HACS 默认商店，需要先添加为自定义仓库：
 
-### HACS 自定义仓库安装（开发/测试）
+1. 在 Home Assistant 中打开 **HACS**
+2. 右上角 ⋮ 菜单 → **自定义存储库**（Custom repositories）
+3. 填写：
+   - **存储库地址**：`https://github.com/tiejiang29/bemfa_cloud_ha`
+   - **类型**：Integration（集成）
+4. 点击 **添加**，然后关闭
+5. 在 HACS 搜索 **Bemfa Cloud**（注意要选带 "Type Override Fork" 标识的那个）
+6. 点击 **下载**，选择版本（默认是最新 release，目前是 `v0.1.6-type-override.2`）
+7. 重启 Home Assistant
 
-如果 HACS 商店暂未收录，或者需要测试开发版本：
+### 接收自动更新
 
-1. 在 HACS 的右上角菜单中选择 **自定义存储库**
-2. 填写存储库地址：`https://github.com/bemfa/bemfa_cloud_ha`
-3. 类型选择 **集成**
-4. 添加后搜索 **Bemfa Cloud** 并下载
-5. 重启 Home Assistant
+HACS 会自动检测本仓库的新 Release。当有新版本发布时：
+
+1. Home Assistant **设置 → 更新** 里会出现 `update.bemfa_cloud_update` 实体
+2. 点击 **安装** 即可一键升级
+3. 升级后 HA 会提示重启，重启后新版本生效
+
+你也可以在 HACS 集成页面手动检查更新：HACS → 集成 → Bemfa Cloud → 右上角 ⋮ → 更新信息
+
+### 从官方版本迁移到本 Fork
+
+如果你已经安装了官方 `bemfa/bemfa_cloud_ha`：
+
+1. **不要先卸载官方版本**（避免丢失现有的同步配置）
+2. 在 HACS 删除官方 Bemfa Cloud（注意：这会移除文件，但你的配置 entry 仍然保留）
+3. 按上面的步骤添加本 fork 为自定义仓库并下载
+4. 重启 HA
+5. 进入 **设置 → 设备与服务 → Bemfa Cloud → 配置**，你原来的同步配置应该都还在
+6. 现在可以在"编辑同步配置"里看到新的"巴法云设备类型（覆盖）"下拉框
 
 ### 手动安装
 
-1. 打开 Home Assistant 配置目录，也就是包含 `configuration.yaml` 的目录
+1. 打开 Home Assistant 配置目录（包含 `configuration.yaml` 的目录）
 2. 如果没有 `custom_components` 目录，请创建一个
-3. 将本仓库的 `custom_components/bemfa_cloud` 复制到 HA 的 `custom_components` 目录中
-4. 重启 Home Assistant
+3. 从 [Latest Release](https://github.com/tiejiang29/bemfa_cloud_ha/releases/latest) 下载 zip 包
+4. 解压后把 `custom_components/bemfa_cloud/` 复制到 HA 的 `custom_components/` 目录
+5. 重启 Home Assistant
 
 ## 设备类型覆盖（v0.1.6 新增）
 
