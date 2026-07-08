@@ -159,9 +159,9 @@ class BemfaCloudTcp:
             {
                 "cmd": 2,
                 "uid": self._uid,
-                "topics": [sync.topic],
+                "topic": sync.topic,
                 "msg": msg,
-                "mode": 3,
+                "mode": 1,
             }
         )
 
@@ -215,7 +215,8 @@ class BemfaCloudTcp:
                         raise ConnectionError("Bemfa TCP resubscribe failed")
                     next_resubscribe = self._hass.loop.time() + TCP_RESUBSCRIBE_INTERVAL
                     continue
-                if not await self._send({"cmd": 7, "uid": self._uid}):
+                # V2 protocol: heartbeat is cmd:0 (NOT cmd:7 which is time query)
+                if not await self._send({"cmd": 0}):
                     raise ConnectionError("Bemfa TCP heartbeat failed")
                 next_ping = self._hass.loop.time() + TCP_PING_INTERVAL
                 continue
@@ -232,15 +233,21 @@ class BemfaCloudTcp:
             self._handle_payload(payload)
 
     def _handle_payload(self, payload: dict[str, Any]) -> None:
-        topics = payload.get("topics") or []
-        if not topics:
+        # V2 protocol: incoming messages use "topic" (singular string),
+        # NOT "topics" (array). Some legacy messages may still use the
+        # array form, so check both for compatibility.
+        topic = payload.get("topic")
+        if not topic:
+            topics = payload.get("topics") or []
+            if topics:
+                topic = topics[0] if isinstance(topics, list) else str(topics)
+        if not topic:
             return
-        topic = topics[0]
         sync = self._topic_to_sync.get(topic)
         if sync is None or "msg" not in payload:
             return
         msg = payload["msg"]
-        LOGGER.debug("Bemfa TCP received topic=%s msg=%s", topic, self._msg_to_text(msg))
+        LOGGER.warning("Bemfa TCP received topic=%s msg=%s", topic, self._msg_to_text(msg))
         self._suppress_state_feedback(sync, seconds=2)
         sync.resolve_msg(msg)
         self._hass.async_create_task(
@@ -264,9 +271,9 @@ class BemfaCloudTcp:
             {
                 "cmd": 2,
                 "uid": self._uid,
-                "topics": [sync.topic],
+                "topic": sync.topic,
                 "msg": feedback,
-                "mode": 3,
+                "mode": 1,
             }
         )
 
@@ -285,10 +292,15 @@ class BemfaCloudTcp:
 
     async def _subscribe(self, topics: list[str]) -> bool:
         if topics:
-            payload = {"cmd": 1, "uid": self._uid, "topics": topics, "mode": 0}
+            # V2 protocol: "topic" is a comma-joined STRING (max 8 topics),
+            # NOT a "topics" array. Using the wrong field name causes the
+            # server to silently ignore the subscription, which means the
+            # device never shows as "online" on the Bemfa console.
+            topic_str = ",".join(topics)
+            payload = {"cmd": 1, "uid": self._uid, "topic": topic_str, "mode": 0}
             LOGGER.warning(
-                "Bemfa TCP subscribe: sending cmd=1 for %d topics: %s",
-                len(topics), topics,
+                "Bemfa TCP subscribe: sending cmd=1 for %d topics (joined as string): %s",
+                len(topics), topic_str,
             )
             if not await self._send(payload):
                 LOGGER.warning("Bemfa TCP subscribe: _send returned False, closing writer")
