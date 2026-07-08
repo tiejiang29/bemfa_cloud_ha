@@ -80,9 +80,20 @@ class BemfaCloudTcp:
             self._topic_to_sync[sync.topic] = sync
             topics.append(sync.topic)
 
-        await self._subscribe(topics)
+        LOGGER.warning(
+            "Bemfa TCP: subscribing to %d topics via async_add_syncs: %s. "
+            "Current writer is %s",
+            len(topics), topics,
+            "connected" if (self._writer and not self._writer.is_closing()) else "NOT connected",
+        )
+        sub_ok = await self._subscribe(topics)
+        LOGGER.warning("Bemfa TCP: subscribe result=%s", sub_ok)
         for sync in syncs:
             await self.async_publish_sync(sync)
+            LOGGER.warning(
+                "Bemfa TCP: published state for topic=%s msg=%s",
+                sync.topic, sync.generate_msg(),
+            )
 
     async def async_subscribe_all(self) -> bool:
         """Subscribe all known topics on the current TCP connection."""
@@ -237,10 +248,16 @@ class BemfaCloudTcp:
 
     async def _subscribe(self, topics: list[str]) -> bool:
         if topics:
-            LOGGER.info("Bemfa TCP subscribe topics: %s", topics)
-            if not await self._send({"cmd": 1, "uid": self._uid, "topics": topics, "mode": 0}):
+            payload = {"cmd": 1, "uid": self._uid, "topics": topics, "mode": 0}
+            LOGGER.warning(
+                "Bemfa TCP subscribe: sending cmd=1 for %d topics: %s",
+                len(topics), topics,
+            )
+            if not await self._send(payload):
+                LOGGER.warning("Bemfa TCP subscribe: _send returned False, closing writer")
                 await self._close_writer()
                 return False
+            LOGGER.warning("Bemfa TCP subscribe: _send returned True")
         return True
 
     async def _publish_all(self) -> None:
@@ -250,17 +267,25 @@ class BemfaCloudTcp:
     async def _send(self, payload: dict[str, Any]) -> bool:
         writer = self._writer
         if writer is None or writer.is_closing():
+            LOGGER.warning(
+                "Bemfa TCP _send: writer is %s, cannot send payload cmd=%s",
+                "None" if writer is None else "closing",
+                payload.get("cmd"),
+            )
             return False
         try:
-            writer.write(
-                json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode(
-                    "utf-8"
-                )
-                + b"\n"
-            )
+            data = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8") + b"\n"
+            writer.write(data)
             await writer.drain()
+            LOGGER.warning(
+                "Bemfa TCP _send: sent %d bytes for cmd=%s topics=%s",
+                len(data), payload.get("cmd"), payload.get("topics"),
+            )
         except Exception as err:  # noqa: BLE001
-            LOGGER.warning("Bemfa TCP send failed: %s", err)
+            LOGGER.warning(
+                "Bemfa TCP _send failed: %s (type=%s, repr=%r) for payload cmd=%s",
+                err, type(err).__name__, err, payload.get("cmd"),
+            )
             await self._close_writer()
             return False
         return True
