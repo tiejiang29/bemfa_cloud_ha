@@ -73,27 +73,64 @@ class BemfaCloudTcp:
         await self.async_add_syncs([sync])
 
     async def async_add_syncs(self, syncs: list[Sync]) -> None:
-        """Add syncs, subscribe their topics in one TCP command, and publish state."""
+        """Add syncs, subscribe their topics in one TCP command, and publish state.
+
+        If the TCP writer is not currently connected (e.g. the background
+        _run() loop is between connections after a disconnect), we wait
+        briefly for it to reconnect before giving up. This is critical
+        because HA's reload creates a new service whose restore runs
+        almost immediately — the TCP connection may not be established
+        yet when async_add_syncs is called.
+        """
 
         topics: list[str] = []
         for sync in syncs:
             self._topic_to_sync[sync.topic] = sync
             topics.append(sync.topic)
 
+        # Wait up to 10 seconds for the TCP writer to become available.
+        # The _run() loop reconnects with a 5-second delay, so 10s covers
+        # at least one reconnect cycle.
+        waited = 0
+        while waited < 10:
+            if self._writer is not None and not self._writer.is_closing():
+                break
+            LOGGER.warning(
+                "Bemfa TCP: writer not ready (waited %ds), waiting for reconnect...",
+                waited,
+            )
+            await asyncio.sleep(1)
+            waited += 1
+
+        writer_state = (
+            "connected" if (self._writer and not self._writer.is_closing())
+            else "NOT connected (gave up after 10s)"
+        )
         LOGGER.warning(
             "Bemfa TCP: subscribing to %d topics via async_add_syncs: %s. "
             "Current writer is %s",
-            len(topics), topics,
-            "connected" if (self._writer and not self._writer.is_closing()) else "NOT connected",
+            len(topics), topics, writer_state,
         )
+
         sub_ok = await self._subscribe(topics)
         LOGGER.warning("Bemfa TCP: subscribe result=%s", sub_ok)
+
+        # Publish state for each sync. Even if subscribe failed, we still
+        # try to publish — if the writer comes back, the publish will
+        # succeed on retry. If writer is None, publish will log the failure
+        # but we don't abort the whole restore.
         for sync in syncs:
-            await self.async_publish_sync(sync)
-            LOGGER.warning(
-                "Bemfa TCP: published state for topic=%s msg=%s",
-                sync.topic, sync.generate_msg(),
-            )
+            try:
+                await self.async_publish_sync(sync)
+                LOGGER.warning(
+                    "Bemfa TCP: published state for topic=%s msg=%s",
+                    sync.topic, sync.generate_msg(),
+                )
+            except Exception as err:  # noqa: BLE001
+                LOGGER.warning(
+                    "Bemfa TCP: publish failed for topic=%s: %s (type=%s)",
+                    sync.topic, err, type(err).__name__,
+                )
 
     async def async_subscribe_all(self) -> bool:
         """Subscribe all known topics on the current TCP connection."""
