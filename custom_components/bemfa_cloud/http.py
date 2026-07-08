@@ -36,12 +36,34 @@ class TopicPayload:
     unit: str = ""
 
     def as_api_item(self) -> dict[str, Any]:
-        """Return the API item payload."""
+        """Return the API item payload.
+
+        Truncates the name to fit Bemfa's v_name column (32 bytes in
+        UTF-8). Without truncation, names like 'Yeelight智能LED吸顶灯
+        升级版  灯' (40 bytes) cause a database error that fails the
+        entire API call.
+        """
+        name = self.name
+        if name:
+            encoded = name.encode("utf-8")
+            if len(encoded) > 32:
+                # Truncate at 32 bytes, being careful not to split a
+                # multi-byte UTF-8 character.
+                truncated = encoded[:32]
+                # UTF-8 continuation bytes start with 0b10xxxxxx (0x80-0xBF).
+                # Walk back until we're not in the middle of a character.
+                while truncated and (truncated[-1] & 0xC0) == 0x80:
+                    truncated = truncated[:-1]
+                name = truncated.decode("utf-8", errors="ignore")
+                LOGGER.warning(
+                    "Bemfa Cloud: truncated topic name %r -> %r (32 byte limit)",
+                    self.name, name,
+                )
 
         return {
             "type": BEMFA_TOPIC_TYPE_TCP_V2,
             "topic": self.topic,
-            "name": self.name,
+            "name": name,
             "room": self.room,
             "group": self.group,
             "unit": self.unit,
@@ -61,18 +83,29 @@ class BemfaCloudHttp:
     async def async_create_topics(self, topics: list[TopicPayload]) -> None:
         """Create one or more TCP V2 topics.
 
-        The Bemfa API supports up to 99 topics per batch.
+        We create topics ONE AT A TIME instead of using the batch
+        addTopicsNoSecret endpoint. Reasons:
+          1. The batch endpoint returns 40006 if ANY topic in the batch
+             already exists, and does NOT create the other (new) topics
+             in the batch — this is a silent failure for the new ones.
+          2. If any topic's name is too long (Bemfa's v_name column is
+             ~32 bytes), the batch endpoint fails the ENTIRE batch with
+             a database error, blocking all other topics.
+          3. Single-topic createTopicNoSecret returns clear per-topic
+             success/failure, and one failure does not block others.
         """
-
         if not topics:
             return
 
-        if len(topics) == 1:
-            await self._async_create_topic(topics[0])
-            return
-
-        for index in range(0, len(topics), 99):
-            await self._async_add_topics(topics[index : index + 99])
+        for topic in topics:
+            try:
+                await self._async_create_topic(topic)
+            except BemfaCloudApiError as err:
+                LOGGER.warning(
+                    "Bemfa Cloud: failed to create topic %s (name=%r): %s. "
+                    "Continuing with remaining topics.",
+                    topic.topic, topic.name, err,
+                )
 
     async def _async_create_topic(self, topic: TopicPayload) -> None:
         payload = {
