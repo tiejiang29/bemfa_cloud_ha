@@ -195,22 +195,51 @@ class BemfaCloudTcp:
             if not raw:
                 raise ConnectionError("Bemfa TCP connection closed")
 
+            # Log EVERY raw line received from Bemfa, regardless of whether
+            # it parses as JSON. This is critical for debugging reverse
+            # control (Bemfa -> HA) issues.
+            LOGGER.warning("Bemfa TCP raw received: %r", raw[:500])
+
             try:
                 payload = json.loads(raw.decode("utf-8"))
             except ValueError:
-                LOGGER.debug("Ignore non-json TCP payload: %r", raw)
+                LOGGER.warning(
+                    "Bemfa TCP: non-JSON payload received, ignoring: %r", raw[:200]
+                )
                 continue
 
+            LOGGER.warning("Bemfa TCP parsed payload: %s", payload)
             self._handle_payload(payload)
 
     def _handle_payload(self, payload: dict[str, Any]) -> None:
-        # Match official bemfa_cloud_ha: use "topics" array
-        topics = payload.get("topics") or []
-        if not topics:
+        # Bemfa may send either "topics" (array) or "topic" (singular string).
+        # Check both for maximum compatibility.
+        topic = None
+        topics = payload.get("topics")
+        if topics and isinstance(topics, list) and len(topics) > 0:
+            topic = topics[0]
+        elif payload.get("topic"):
+            topic = payload["topic"]
+
+        if not topic:
+            LOGGER.warning(
+                "Bemfa TCP _handle_payload: no topic found in payload. Keys=%s",
+                list(payload.keys()),
+            )
             return
-        topic = topics[0]
+
         sync = self._topic_to_sync.get(topic)
-        if sync is None or "msg" not in payload:
+        if sync is None:
+            LOGGER.warning(
+                "Bemfa TCP _handle_payload: topic %s not in subscribed syncs %s",
+                topic, list(self._topic_to_sync.keys()),
+            )
+            return
+        if "msg" not in payload:
+            LOGGER.warning(
+                "Bemfa TCP _handle_payload: no 'msg' field in payload for topic %s",
+                topic,
+            )
             return
         msg = payload["msg"]
         LOGGER.warning("Bemfa TCP received topic=%s msg=%s", topic, self._msg_to_text(msg))
