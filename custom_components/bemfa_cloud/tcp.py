@@ -125,13 +125,21 @@ class BemfaCloudTcp:
                     timeout=TCP_CONNECT_TIMEOUT,
                 )
                 self._writer = writer
+                LOGGER.warning(
+                    "Bemfa TCP connected to %s:%s, subscribing to %d topics",
+                    TCP_HOST, TCP_PORT, len(self._topic_to_sync),
+                )
                 await self._subscribe(list(self._topic_to_sync))
                 await self._publish_all()
+                LOGGER.warning("Bemfa TCP ready, entering read loop")
                 await self._read_loop(reader)
             except asyncio.CancelledError:
                 raise
             except Exception as err:  # noqa: BLE001
-                LOGGER.warning("Bemfa TCP connection failed: %s", err)
+                LOGGER.warning(
+                    "Bemfa TCP connection failed: %s (type=%s, repr=%r)",
+                    err, type(err).__name__, err,
+                )
             finally:
                 await self._close_writer()
 
