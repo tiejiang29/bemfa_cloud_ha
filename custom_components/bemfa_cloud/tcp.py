@@ -73,52 +73,23 @@ class BemfaCloudTcp:
         await self.async_add_syncs([sync])
 
     async def async_add_syncs(self, syncs: list[Sync]) -> None:
-        """Add syncs, subscribe their topics in one TCP command, and publish state.
-
-        If the TCP writer is not currently connected (e.g. the background
-        _run() loop is between connections after a disconnect), we wait
-        briefly for it to reconnect before giving up. This is critical
-        because HA's reload creates a new service whose restore runs
-        almost immediately — the TCP connection may not be established
-        yet when async_add_syncs is called.
-        """
+        """Add syncs, subscribe their topics in one TCP command, and publish state."""
 
         topics: list[str] = []
         for sync in syncs:
             self._topic_to_sync[sync.topic] = sync
             topics.append(sync.topic)
 
-        # Wait up to 10 seconds for the TCP writer to become available.
-        # The _run() loop reconnects with a 5-second delay, so 10s covers
-        # at least one reconnect cycle.
-        waited = 0
-        while waited < 10:
-            if self._writer is not None and not self._writer.is_closing():
-                break
-            LOGGER.warning(
-                "Bemfa TCP: writer not ready (waited %ds), waiting for reconnect...",
-                waited,
-            )
-            await asyncio.sleep(1)
-            waited += 1
-
-        writer_state = (
-            "connected" if (self._writer and not self._writer.is_closing())
-            else "NOT connected (gave up after 10s)"
-        )
         LOGGER.warning(
             "Bemfa TCP: subscribing to %d topics via async_add_syncs: %s. "
             "Current writer is %s",
-            len(topics), topics, writer_state,
+            len(topics), topics,
+            "connected" if (self._writer and not self._writer.is_closing()) else "NOT connected",
         )
 
         sub_ok = await self._subscribe(topics)
         LOGGER.warning("Bemfa TCP: subscribe result=%s", sub_ok)
 
-        # Publish state for each sync. Even if subscribe failed, we still
-        # try to publish — if the writer comes back, the publish will
-        # succeed on retry. If writer is None, publish will log the failure
-        # but we don't abort the whole restore.
         for sync in syncs:
             try:
                 await self.async_publish_sync(sync)
@@ -159,9 +130,9 @@ class BemfaCloudTcp:
             {
                 "cmd": 2,
                 "uid": self._uid,
-                "topic": sync.topic,
+                "topics": [sync.topic],
                 "msg": msg,
-                "mode": 1,
+                "mode": 3,
             }
         )
 
@@ -215,8 +186,8 @@ class BemfaCloudTcp:
                         raise ConnectionError("Bemfa TCP resubscribe failed")
                     next_resubscribe = self._hass.loop.time() + TCP_RESUBSCRIBE_INTERVAL
                     continue
-                # V2 protocol: heartbeat is cmd:0 (NOT cmd:7 which is time query)
-                if not await self._send({"cmd": 0}):
+                # Heartbeat — matches official bemfa_cloud_ha implementation
+                if not await self._send({"cmd": 7, "uid": self._uid}):
                     raise ConnectionError("Bemfa TCP heartbeat failed")
                 next_ping = self._hass.loop.time() + TCP_PING_INTERVAL
                 continue
@@ -233,16 +204,11 @@ class BemfaCloudTcp:
             self._handle_payload(payload)
 
     def _handle_payload(self, payload: dict[str, Any]) -> None:
-        # V2 protocol: incoming messages use "topic" (singular string),
-        # NOT "topics" (array). Some legacy messages may still use the
-        # array form, so check both for compatibility.
-        topic = payload.get("topic")
-        if not topic:
-            topics = payload.get("topics") or []
-            if topics:
-                topic = topics[0] if isinstance(topics, list) else str(topics)
-        if not topic:
+        # Match official bemfa_cloud_ha: use "topics" array
+        topics = payload.get("topics") or []
+        if not topics:
             return
+        topic = topics[0]
         sync = self._topic_to_sync.get(topic)
         if sync is None or "msg" not in payload:
             return
@@ -271,9 +237,9 @@ class BemfaCloudTcp:
             {
                 "cmd": 2,
                 "uid": self._uid,
-                "topic": sync.topic,
+                "topics": [sync.topic],
                 "msg": feedback,
-                "mode": 1,
+                "mode": 3,
             }
         )
 
@@ -292,15 +258,11 @@ class BemfaCloudTcp:
 
     async def _subscribe(self, topics: list[str]) -> bool:
         if topics:
-            # V2 protocol: "topic" is a comma-joined STRING (max 8 topics),
-            # NOT a "topics" array. Using the wrong field name causes the
-            # server to silently ignore the subscription, which means the
-            # device never shows as "online" on the Bemfa console.
-            topic_str = ",".join(topics)
-            payload = {"cmd": 1, "uid": self._uid, "topic": topic_str, "mode": 0}
+            # Match official bemfa_cloud_ha: use "topics" array
+            payload = {"cmd": 1, "uid": self._uid, "topics": topics, "mode": 0}
             LOGGER.warning(
-                "Bemfa TCP subscribe: sending cmd=1 for %d topics (joined as string): %s",
-                len(topics), topic_str,
+                "Bemfa TCP subscribe: sending cmd=1 for %d topics: %s",
+                len(topics), topics,
             )
             if not await self._send(payload):
                 LOGGER.warning("Bemfa TCP subscribe: _send returned False, closing writer")

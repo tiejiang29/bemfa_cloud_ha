@@ -33,22 +33,11 @@ class BemfaCloudService:
         await self._tcp.async_start()
 
         async def _start(event: Event | None = None) -> None:
-            # Delay 1 second before restoring. HA's add_update_listener
-            # fires multiple reload events in rapid succession on options
-            # change — without delay, each reload creates a new service
-            # that races to call the Bemfa API and connect TCP, causing
-            # connection storms and "session is closed" errors.
-            #
-            # The 1-second delay + the in_progress guard in
-            # _async_restore_syncs together ensure that even if multiple
-            # reloads fire, only one actually hits the Bemfa API.
-            import asyncio
-            await asyncio.sleep(1)
             await self._async_restore_syncs()
 
         if self._hass.state == CoreState.running:
             self._hass.async_create_background_task(
-                _start(), "bemfa_cloud_restore_syncs"
+                self._async_restore_syncs(), "bemfa_cloud_restore_syncs"
             )
         else:
             self._hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STARTED, _start)

@@ -91,8 +91,8 @@ OVERRIDABLE_TOPIC_SUFFIXES: Final = (
 )
 
 
-TCP_HOST: Final = "tcpv2.bemfa.com"
-TCP_PORT: Final = 8343
+TCP_HOST: Final = "tcp-cn-03.bemfa.com"
+TCP_PORT: Final = 8342
 TCP_CONNECT_TIMEOUT: Final = 20
 TCP_RECONNECT_DELAY: Final = 5
 TCP_PING_INTERVAL: Final = 30
