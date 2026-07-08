@@ -658,45 +658,62 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
         # the effective topic will change (topic embeds the 3-digit suffix).
         # We need to delete the OLD effective topic from Bemfa Cloud before
         # saving the new config, otherwise the old topic will be orphaned.
-        old_config = self._config.get(self._sync.default_topic, {})
-        old_override = old_config.get(OPTIONS_DEVICE_TYPE, "") if old_config else ""
-        new_override = user_input.get(OPTIONS_DEVICE_TYPE, "")
-        type_changed = (old_override or "") != (new_override or "")
+        #
+        # IMPORTANT: only do this if there was a PREVIOUS config for this
+        # entity. If self._config has no entry for this default_topic,
+        # this is a NEW sync, not a modify — there is no old topic to delete.
+        old_config = self._config.get(self._sync.default_topic)
+        is_new_sync = not old_config  # empty dict or None means new sync
 
-        if type_changed:
-            # Compute the OLD effective topic (before applying new config)
-            old_sync = self._sync
-            old_sync.config = old_config.copy() if old_config else {}
-            old_effective_topic = old_sync.topic
-            # Apply new config
-            self._sync.config = user_input.copy()
-            new_effective_topic = self._sync.topic
-
+        if is_new_sync:
+            # New sync — just save config, no old topic to delete.
             LOGGER.warning(
-                "Bemfa Cloud modify_sync: type changed for entity=%s "
-                "(old_override=%r -> new_override=%r). "
-                "Old topic=%s, New topic=%s. "
-                "Will delete old topic from Bemfa Cloud.",
-                self._sync.entity_id, old_override, new_override,
-                old_effective_topic, new_effective_topic,
+                "Bemfa Cloud create_sync: new sync for entity=%s "
+                "default_topic=%s, saving with override=%r",
+                self._sync.entity_id, self._sync.default_topic,
+                user_input.get(OPTIONS_DEVICE_TYPE, ""),
             )
-
-            if old_effective_topic != new_effective_topic:
-                service = self._get_service()
-                try:
-                    await service.async_delete_cloud_topic(old_effective_topic)
-                    LOGGER.warning(
-                        "Bemfa Cloud modify_sync: deleted old topic %s from cloud",
-                        old_effective_topic,
-                    )
-                except Exception as err:  # noqa: BLE001
-                    LOGGER.warning(
-                        "Bemfa Cloud modify_sync: failed to delete old topic %s: %s. "
-                        "You may need to remove it manually in the Bemfa console.",
-                        old_effective_topic, err,
-                    )
-        else:
             self._sync.config = user_input.copy()
+        else:
+            # Existing sync being modified — check if type override changed.
+            old_override = old_config.get(OPTIONS_DEVICE_TYPE, "")
+            new_override = user_input.get(OPTIONS_DEVICE_TYPE, "")
+            type_changed = (old_override or "") != (new_override or "")
+
+            if type_changed:
+                # Compute the OLD effective topic (before applying new config)
+                old_sync = self._sync
+                old_sync.config = old_config.copy()
+                old_effective_topic = old_sync.topic
+                # Apply new config
+                self._sync.config = user_input.copy()
+                new_effective_topic = self._sync.topic
+
+                LOGGER.warning(
+                    "Bemfa Cloud modify_sync: type changed for entity=%s "
+                    "(old_override=%r -> new_override=%r). "
+                    "Old topic=%s, New topic=%s. "
+                    "Will delete old topic from Bemfa Cloud.",
+                    self._sync.entity_id, old_override, new_override,
+                    old_effective_topic, new_effective_topic,
+                )
+
+                if old_effective_topic != new_effective_topic:
+                    service = self._get_service()
+                    try:
+                        await service.async_delete_cloud_topic(old_effective_topic)
+                        LOGGER.warning(
+                            "Bemfa Cloud modify_sync: deleted old topic %s from cloud",
+                            old_effective_topic,
+                        )
+                    except Exception as err:  # noqa: BLE001
+                        LOGGER.warning(
+                            "Bemfa Cloud modify_sync: failed to delete old topic %s: %s. "
+                            "You may need to remove it manually in the Bemfa console.",
+                            old_effective_topic, err,
+                        )
+            else:
+                self._sync.config = user_input.copy()
 
         # Store under the stable default_topic key so that future type
         # overrides (which change the *effective* topic) do not orphan
