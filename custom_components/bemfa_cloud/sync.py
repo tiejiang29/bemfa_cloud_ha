@@ -398,9 +398,13 @@ class ControllableSync(Sync):
         if state is None:
             return
 
+        LOGGER.warning("Bemfa Cloud resolve_msg: entity=%s, msg=%r (type=%s)", self._entity_id, msg, type(msg).__name__)
+
         if self._resolve_json_msg(msg, state.attributes):
+            LOGGER.warning("Bemfa Cloud resolve_msg: resolved via JSON path")
             return
 
+        LOGGER.warning("Bemfa Cloud resolve_msg: JSON path failed, trying # separator path")
         msg_list = self._msg_to_parts(msg, state.attributes)
         if msg_list[0] == MSG_OFF:
             msg_list = [MSG_OFF]  # discard any data followed by "off"

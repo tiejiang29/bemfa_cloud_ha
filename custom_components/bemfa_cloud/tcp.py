@@ -198,7 +198,7 @@ class BemfaCloudTcp:
             # Log EVERY raw line received from Bemfa, regardless of whether
             # it parses as JSON. This is critical for debugging reverse
             # control (Bemfa -> HA) issues.
-            LOGGER.debug("Bemfa TCP raw received: %r", raw[:500])
+            LOGGER.warning("Bemfa TCP raw received: %r", raw[:500])
 
             try:
                 payload = json.loads(raw.decode("utf-8"))
@@ -208,7 +208,7 @@ class BemfaCloudTcp:
                 )
                 continue
 
-            LOGGER.debug("Bemfa TCP parsed payload: %s", payload)
+            LOGGER.warning("Bemfa TCP parsed payload: %s", payload)
             self._handle_payload(payload)
 
     def _handle_payload(self, payload: dict[str, Any]) -> None:
@@ -242,7 +242,7 @@ class BemfaCloudTcp:
             )
             return
         msg = payload["msg"]
-        LOGGER.debug("Bemfa TCP received topic=%s msg=%s", topic, self._msg_to_text(msg))
+        LOGGER.warning("Bemfa TCP received topic=%s msg=%s", topic, self._msg_to_text(msg))
         self._suppress_state_feedback(sync, seconds=2)
         sync.resolve_msg(msg)
         self._hass.async_create_task(
