@@ -214,6 +214,18 @@ class ConfigFlow(AbstractOAuth2FlowHandler, domain=DOMAIN):
             CONF_REGION: BEMFA_REGION,
             CONF_AUTH_MODE: AUTH_MODE_WECHAT_SCAN,
         }
+
+        # WeChat login response also contains a Bearer token (JWT) in the
+        # "token" field. Save it so cloud topic deletion (v5 API) works
+        # without requiring the user to separately configure email+password.
+        # Token expires after ~30 days. Unlike email+password mode, we
+        # cannot auto-refresh it (WeChat scan requires user interaction),
+        # so the user will need to re-scan when it expires.
+        wechat_token = self._wechat_login_data.get("token")
+        if wechat_token and isinstance(wechat_token, str) and wechat_token.startswith("eyJ"):
+            entry_data[CONF_BEARER_TOKEN] = wechat_token
+            LOGGER.debug("WeChat login: captured Bearer token for cloud deletion")
+
         return await self._async_show_setup_next(entry_data)
 
     async def async_step_wechat_timeout(

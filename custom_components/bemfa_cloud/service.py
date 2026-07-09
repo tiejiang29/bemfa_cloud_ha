@@ -41,10 +41,11 @@ class BemfaCloudService:
         self._config = config
         await self._tcp.async_start()
 
-        # If email+password are configured, auto-refresh the Bearer token.
-        # This runs in the background and ensures the token is always valid
-        # for cloud topic deletion (v5 API).
-        if self._email and self._password:
+        # If Bearer token OR email+password is configured, start the token
+        # refresh/monitoring background task.
+        # - email+password: auto-refresh via login
+        # - token only (WeChat scan): monitor expiry, warn when near expiry
+        if self._bearer_token or (self._email and self._password):
             self._token_refresh_task = self._hass.async_create_background_task(
                 self._async_token_refresh_loop(), "bemfa_cloud_token_refresh"
             )
@@ -64,14 +65,31 @@ class BemfaCloudService:
     async def _async_token_refresh_loop(self) -> None:
         """Background task that keeps the Bearer token fresh.
 
-        On startup, if no token or token is near expiry, login immediately.
-        Then check every hour; refresh when <2 days until expiry.
+        Two modes:
+        1. Email + password configured: auto-login to refresh token.
+        2. Only Bearer token (e.g. from WeChat scan): cannot auto-refresh.
+           Log a warning when token is near expiry telling the user to
+           re-scan or configure email+password.
         """
 
+        warning_shown = False
         while True:
             try:
                 if self._should_refresh_token():
-                    await self._async_refresh_token()
+                    if self._email and self._password:
+                        # Auto-refresh via email login
+                        await self._async_refresh_token()
+                        warning_shown = False
+                    elif self._bearer_token and not warning_shown:
+                        # Token from WeChat scan — cannot auto-refresh
+                        LOGGER.warning(
+                            "Bemfa Cloud: Bearer token is near expiry but "
+                            "email+password not configured. Cloud topic "
+                            "deletion will stop working when it expires. "
+                            "Please re-scan WeChat QR or configure "
+                            "email+password to enable auto-refresh."
+                        )
+                        warning_shown = True
             except Exception as err:  # noqa: BLE001
                 LOGGER.warning(
                     "Bemfa Cloud: token refresh failed: %s. "
