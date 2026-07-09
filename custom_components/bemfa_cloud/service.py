@@ -39,12 +39,19 @@ class BemfaCloudService:
         """Start service and restore configured syncs."""
 
         self._config = config
-        await self._tcp.async_start()
 
-        # Token management is on-demand only:
-        # - email+password: login when a delete is needed, no background task
-        # - WeChat scan: show QR notification when a delete is needed
-        # - No background polling, no wasted API calls
+        # Use a shared TCP client stored in hass.data so that multiple
+        # service instances (from rapid reloads) don't create competing
+        # TCP connections. Only the first instance creates the TCP client;
+        # subsequent instances reuse it.
+        domain_data = self._hass.data.setdefault(DOMAIN, {})
+        shared_data = domain_data.setdefault("_shared", {})
+        if "tcp" not in shared_data:
+            shared_data["tcp"] = self._tcp
+            await self._tcp.async_start()
+        else:
+            # Reuse the existing TCP client — replace our reference
+            self._tcp = shared_data["tcp"]
 
         async def _start(event: Event | None = None) -> None:
             await self._async_restore_syncs()
@@ -249,7 +256,15 @@ class BemfaCloudService:
         for unsub in self._unsub_registry_listeners:
             unsub()
         self._unsub_registry_listeners.clear()
-        await self._tcp.async_stop()
+
+        # Only stop the shared TCP if we own it (we're the last service
+        # instance). During reload, a new service instance is created
+        # before the old one is stopped, so the TCP should stay alive.
+        domain_data = self._hass.data.get(DOMAIN, {})
+        shared_data = domain_data.get("_shared", {})
+        if shared_data.get("tcp") is self._tcp:
+            await self._tcp.async_stop()
+            shared_data.pop("tcp", None)
 
     async def _async_restore_syncs(self) -> None:
         # Debounce: if a restore is already in progress FOR THIS HASS
