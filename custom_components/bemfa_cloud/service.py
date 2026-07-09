@@ -12,7 +12,7 @@ from homeassistant.core import CALLBACK_TYPE, CoreState, Event, HomeAssistant
 from homeassistant.helpers import area_registry, device_registry, entity_registry
 
 from .const import CONF_BEARER_TOKEN, CONF_EMAIL, CONF_PASSWORD, DOMAIN, EXCLUDED_SOURCE_PLATFORMS, LOGGER, OPTIONS_NAME, WECHAT_LOGIN_POLL_URL, WECHAT_QR_IMAGE_URL, WECHAT_QR_URL
-from .http import BemfaCloudHttp, TopicPayload
+from .http import BemfaCloudApiError, BemfaCloudHttp, TopicPayload
 from .sync import SYNC_TYPES, Sync
 from .tcp import BemfaCloudTcp
 
@@ -33,7 +33,7 @@ class BemfaCloudService:
         self._syncs_by_entity_id: dict[str, Sync] = {}
         self._unsub_registry_listeners: list[CALLBACK_TYPE] = []
         self._restore_in_progress: bool = False
-        self._token_refresh_task: asyncio.Task | None = None
+        self._wechat_sid_history: bool = bool(credentials.get(CONF_BEARER_TOKEN))
 
     async def async_start(self, config: dict[str, dict[str, str]]) -> None:
         """Start service and restore configured syncs."""
@@ -41,14 +41,10 @@ class BemfaCloudService:
         self._config = config
         await self._tcp.async_start()
 
-        # If Bearer token OR email+password is configured, start the token
-        # refresh/monitoring background task.
-        # - email+password: auto-refresh via login
-        # - token only (WeChat scan): monitor expiry, warn when near expiry
-        if self._bearer_token or (self._email and self._password):
-            self._token_refresh_task = self._hass.async_create_background_task(
-                self._async_token_refresh_loop(), "bemfa_cloud_token_refresh"
-            )
+        # Token management is on-demand only:
+        # - email+password: login when a delete is needed, no background task
+        # - WeChat scan: show QR notification when a delete is needed
+        # - No background polling, no wasted API calls
 
         async def _start(event: Event | None = None) -> None:
             await self._async_restore_syncs()
@@ -62,63 +58,53 @@ class BemfaCloudService:
 
         self._start_registry_listeners()
 
-    async def _async_token_refresh_loop(self) -> None:
-        """Background task that keeps the Bearer token fresh.
+    async def _async_ensure_valid_token(self) -> str | None:
+        """Ensure we have a valid Bearer token for cloud deletion.
 
-        Three modes:
-        1. Email + password configured: auto-login to refresh token.
-        2. Only Bearer token (e.g. from WeChat scan): cannot auto-refresh.
-           When token is near expiry, show a persistent notification with
-           a WeChat QR code. The user scans it, the plugin polls for
-           login completion, and updates the token automatically.
-        3. No token at all: nothing to do.
+        Called on-demand when a delete is needed (not proactively).
+        Returns the token, or None if no token can be obtained.
+
+        Logic:
+        1. If we have a token and it's not expired → return it
+        2. If email+password configured → login to get fresh token
+        3. If only expired token (from WeChat) → show QR notification,
+           wait for scan, return new token
+        4. No token and no credentials → return None
         """
 
-        warning_shown = False
-        wechat_polling = False
+        # Check if current token is still valid
+        if self._bearer_token and not self._should_refresh_token():
+            return self._bearer_token
 
-        while True:
+        # Token is missing or expired — try to refresh
+        if self._email and self._password:
             try:
-                if self._should_refresh_token():
-                    if self._email and self._password:
-                        # Mode 1: auto-refresh via email login
-                        await self._async_refresh_token()
-                        warning_shown = False
-                        wechat_polling = False
-                    elif self._bearer_token and not warning_shown:
-                        # Mode 2: token from WeChat scan — show QR notification
-                        warning_shown = True
-                        # Don't start QR polling if we're already polling
-                        if not wechat_polling:
-                            wechat_polling = True
-                            self._hass.async_create_background_task(
-                                self._async_wechat_renew_via_qr(),
-                                "bemfa_cloud_wechat_renew"
-                            )
+                await self._async_refresh_token()
+                return self._bearer_token
             except Exception as err:  # noqa: BLE001
                 LOGGER.warning(
-                    "Bemfa Cloud: token refresh failed: %s. "
-                    "Cloud topic deletion may not work until next successful refresh.",
-                    err,
+                    "Bemfa Cloud: email login failed during delete: %s", err
                 )
-            # Check every hour
-            await asyncio.sleep(3600)
+                return None
 
-    async def _async_wechat_renew_via_qr(self) -> None:
-        """Show a WeChat QR notification and poll for scan to renew token.
+        # WeChat scan mode — show QR and wait for scan
+        if self._bearer_token is not None or self._wechat_sid_history:
+            # Had a token before (from WeChat scan), show QR for renewal
+            new_token = await self._async_wechat_renew_via_qr()
+            return new_token
 
-        This runs as a background task when the Bearer token is near expiry
-        and email+password is not configured. It:
-        1. Fetches a WeChat QR code
-        2. Shows a persistent notification with the QR image
-        3. Polls every 3 seconds for up to 5 minutes
-        4. If scanned, extracts the new token and clears the notification
-        5. If timeout, updates the notification telling the user to reconfigure
+        return None
+
+    async def _async_wechat_renew_via_qr(self) -> str | None:
+        """Show a WeChat QR notification and poll for scan to get a token.
+
+        Called on-demand when a delete is needed and the token is expired.
+        Returns the new token, or None if scan fails/times out.
         """
 
         from homeassistant.components import persistent_notification
         from homeassistant.helpers.aiohttp_client import async_get_clientsession
-        import binascii
+        import time
 
         notification_id = f"{DOMAIN}_token_renew_{id(self)}"
 
@@ -129,36 +115,35 @@ class BemfaCloudService:
                 qr_data = await response.json(content_type=None)
 
             if response.status >= 400 or qr_data.get("code") not in (0, None):
-                LOGGER.warning("Bemfa Cloud: failed to fetch WeChat QR for token renewal: %s", qr_data)
-                return
+                LOGGER.warning("Bemfa Cloud: failed to fetch WeChat QR: %s", qr_data)
+                return None
 
             payload = qr_data.get("data") if isinstance(qr_data.get("data"), dict) else {}
             ticket = str(payload.get("url") or "")
             sid = str(payload.get("sid") or "")
             if not ticket or not sid:
                 LOGGER.warning("Bemfa Cloud: WeChat QR response missing ticket/sid: %s", qr_data)
-                return
+                return None
 
             qr_image_url = WECHAT_QR_IMAGE_URL.format(ticket=ticket)
         except Exception as err:  # noqa: BLE001
-            LOGGER.warning("Bemfa Cloud: failed to prepare WeChat QR for token renewal: %s", err)
-            return
+            LOGGER.warning("Bemfa Cloud: failed to prepare WeChat QR: %s", err)
+            return None
 
         # Step 2: Show persistent notification with QR code
         persistent_notification.async_create(
             self._hass,
-            f"Bemfa Cloud 的 Bearer Token 即将过期，云端主题删除功能将停止工作。\n\n"
+            f"需要删除巴法云云端主题，但 Bearer Token 已过期。\n\n"
             f"**请用微信扫描下方二维码续期：**\n\n"
             f"![微信扫码续期]({qr_image_url})\n\n"
-            f"扫码成功后此通知会自动消失。\n\n"
-            f"或者，在集成配置里填入邮箱+密码，以后可以自动刷新。",
-            title="Bemfa Cloud — Token 即将过期，请扫码续期",
+            f"扫码成功后此通知会自动消失，删除操作会继续执行。\n\n"
+            f"或者，在集成配置里填入邮箱+密码，以后自动刷新无需扫码。",
+            title="Bemfa Cloud — 请扫码续期 Token 以删除云端主题",
             notification_id=notification_id,
         )
-        LOGGER.warning("Bemfa Cloud: Bearer token near expiry, showing WeChat QR notification for renewal")
+        LOGGER.warning("Bemfa Cloud: showing WeChat QR notification for token renewal (needed for delete)")
 
         # Step 3: Poll for scan (every 3s, up to 5 minutes)
-        import time
         deadline = time.time() + 300  # 5 minutes
         poll_interval = 3
 
@@ -172,12 +157,10 @@ class BemfaCloudService:
                     data = await response.json(content_type=None)
 
                 if response.status >= 400:
-                    LOGGER.debug("Bemfa Cloud: WeChat renewal poll HTTP %s", response.status)
                     await asyncio.sleep(poll_interval)
                     continue
 
                 if data.get("code") != 0:
-                    # Not scanned yet, keep polling
                     await asyncio.sleep(poll_interval)
                     continue
 
@@ -188,35 +171,37 @@ class BemfaCloudService:
 
                 # Scanned! Extract token
                 new_token = inner.get("token")
+                persistent_notification.async_dismiss(self._hass, notification_id)
+
                 if new_token and isinstance(new_token, str) and new_token.startswith("eyJ"):
                     self._bearer_token = new_token
-                    persistent_notification.async_dismiss(self._hass, notification_id)
+                    self._wechat_sid_history = True  # remember we've had a WeChat token
                     LOGGER.warning("Bemfa Cloud: Bearer token renewed via WeChat scan")
-                    return
+                    return new_token
                 else:
-                    LOGGER.warning("Bemfa Cloud: WeChat scan succeeded but no token in response: %s", inner)
-                    persistent_notification.async_dismiss(self._hass, notification_id)
-                    return
+                    LOGGER.warning("Bemfa Cloud: WeChat scan succeeded but no token: %s", inner)
+                    return None
 
             except asyncio.CancelledError:
                 raise
-            except Exception as err:  # noqa: BLE001
-                LOGGER.debug("Bemfa Cloud: WeChat renewal poll error: %s", err)
+            except Exception:
+                pass
 
             await asyncio.sleep(poll_interval)
 
         # Step 4: Timeout — update notification
         persistent_notification.async_create(
             self._hass,
-            f"Bemfa Cloud 的 Bearer Token 即将过期，但 5 分钟内未检测到扫码。\n\n"
+            f"5 分钟内未检测到扫码，删除操作已取消。\n\n"
             f"请选择以下方式之一：\n"
-            f"1. 重新扫码：删除并重新添加 Bemfa Cloud 集成\n"
+            f"1. 重新扫码：再次执行删除操作会重新弹出二维码\n"
             f"2. 配置邮箱+密码：删除并重新添加集成时填入邮箱密码，以后自动刷新\n"
-            f"3. 手动填入 Token：从 cloud.bemfa.com 的 Cookies 里复制 token",
-            title="Bemfa Cloud — Token 续期超时",
+            f"3. 手动删除：去 https://cloud.bemfa.com/ 控制台手动删",
+            title="Bemfa Cloud — Token 续期超时，删除已取消",
             notification_id=notification_id,
         )
         LOGGER.warning("Bemfa Cloud: WeChat QR renewal timed out after 5 minutes")
+        return None
 
     def _should_refresh_token(self) -> bool:
         """Check if token needs refresh (missing or <2 days to expiry)."""
@@ -260,14 +245,6 @@ class BemfaCloudService:
 
     async def async_stop(self) -> None:
         """Stop service."""
-
-        if self._token_refresh_task is not None:
-            self._token_refresh_task.cancel()
-            try:
-                await self._token_refresh_task
-            except asyncio.CancelledError:
-                pass
-            self._token_refresh_task = None
 
         for unsub in self._unsub_registry_listeners:
             unsub()
@@ -498,21 +475,26 @@ class BemfaCloudService:
         self._syncs_by_entity_id[sync.entity_id] = sync
 
     async def async_delete_cloud_topic(self, topic: str) -> None:
-        """Delete a single topic from Bemfa Cloud.
+        """Delete a single topic from Bemfa Cloud (on-demand token).
 
-        If a Bearer token is available (configured by user), uses the v5
-        console API which works for type=7. Otherwise, falls back to the
-        v1 API (which may fail for type=7 due to a Bemfa server bug).
+        Ensures a valid Bearer token is available before calling v5 delete.
+        If token is expired:
+        - email+password configured → auto-login
+        - WeChat scan mode → show QR notification, wait for scan
+        If no token can be obtained, raises an error.
         """
 
-        if self._bearer_token:
-            await self._http.async_delete_topic_v5(topic, self._bearer_token)
-        else:
-            await self._http.async_delete_topic(topic)
+        token = await self._async_ensure_valid_token()
+        if not token:
+            raise BemfaCloudApiError(
+                "No valid Bearer token available for cloud deletion. "
+                "Please configure email+password or scan WeChat QR."
+            )
+        await self._http.async_delete_topic_v5(topic, token)
 
     def has_bearer_token(self) -> bool:
-        """Return whether a Bearer token is configured for cloud deletion."""
-        return bool(self._bearer_token)
+        """Return whether a Bearer token is available (for UI display)."""
+        return bool(self._bearer_token) or bool(self._email and self._password)
 
     async def async_destroy_sync(self, topic: str) -> None:
         """Remove a local sync AND delete its topic from Bemfa Cloud.
