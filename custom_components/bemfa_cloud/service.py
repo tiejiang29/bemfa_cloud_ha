@@ -6,7 +6,7 @@ from homeassistant.const import EVENT_HOMEASSISTANT_STARTED, SERVICE_TURN_OFF, S
 from homeassistant.core import CALLBACK_TYPE, CoreState, Event, HomeAssistant
 from homeassistant.helpers import area_registry, device_registry, entity_registry
 
-from .const import DOMAIN, EXCLUDED_SOURCE_PLATFORMS, LOGGER, OPTIONS_NAME
+from .const import CONF_BEARER_TOKEN, DOMAIN, EXCLUDED_SOURCE_PLATFORMS, LOGGER, OPTIONS_NAME
 from .http import BemfaCloudHttp, TopicPayload
 from .sync import SYNC_TYPES, Sync
 from .tcp import BemfaCloudTcp
@@ -21,6 +21,7 @@ class BemfaCloudService:
         self._hass = hass
         self._http = BemfaCloudHttp(hass, credentials)
         self._tcp = BemfaCloudTcp(hass, credentials["uid"])
+        self._bearer_token: str | None = credentials.get(CONF_BEARER_TOKEN)
         self._config: dict[str, dict[str, str]] = {}
         self._syncs_by_entity_id: dict[str, Sync] = {}
         self._unsub_registry_listeners: list[CALLBACK_TYPE] = []
@@ -245,18 +246,22 @@ class BemfaCloudService:
             # Unsubscribe the old effective topic and re-subscribe the new one.
             if old_topic != new_topic:
                 await self._tcp.async_remove_sync(old_topic)
-                # Note: we do NOT delete the old topic from Bemfa Cloud
-                # because /v1/deleteTopic has a bug for type=7 (returns
-                # 40000 "Unknown error"). The user must manually delete
-                # the orphaned topic in the Bemfa console. This matches
-                # the official bemfa_cloud_ha plugin's behavior.
-                LOGGER.warning(
-                    "Bemfa Cloud: type override changed for %s. "
-                    "Old topic %s is now orphaned on Bemfa Cloud — "
-                    "please delete it manually in the Bemfa console. "
-                    "New topic %s will be created.",
-                    sync.entity_id, old_topic, new_topic,
-                )
+                # Try to delete the old topic from Bemfa Cloud.
+                # If Bearer token is configured, uses v5 API (works for type=7).
+                # Otherwise, falls back to v1 API (may fail for type=7).
+                try:
+                    await self.async_delete_cloud_topic(old_topic)
+                    LOGGER.debug(
+                        "Bemfa Cloud: deleted old topic %s after type change",
+                        old_topic,
+                    )
+                except Exception as err:  # noqa: BLE001
+                    LOGGER.warning(
+                        "Bemfa Cloud: failed to delete old topic %s after type "
+                        "change: %s. You may need to remove it manually in the "
+                        "Bemfa console.",
+                        old_topic, err,
+                    )
                 await self._ensure_topics([sync])
                 await self._tcp.async_add_sync(sync)
             else:
@@ -274,12 +279,19 @@ class BemfaCloudService:
     async def async_delete_cloud_topic(self, topic: str) -> None:
         """Delete a single topic from Bemfa Cloud.
 
-        Thin wrapper around `BemfaCloudHttp.async_delete_topic` so config_flow
-        can call it without touching the HTTP client directly. Best-effort:
-        callers should catch and log exceptions.
+        If a Bearer token is available (configured by user), uses the v5
+        console API which works for type=7. Otherwise, falls back to the
+        v1 API (which may fail for type=7 due to a Bemfa server bug).
         """
 
-        await self._http.async_delete_topic(topic)
+        if self._bearer_token:
+            await self._http.async_delete_topic_v5(topic, self._bearer_token)
+        else:
+            await self._http.async_delete_topic(topic)
+
+    def has_bearer_token(self) -> bool:
+        """Return whether a Bearer token is configured for cloud deletion."""
+        return bool(self._bearer_token)
 
     async def async_destroy_sync(self, topic: str) -> None:
         """Remove a local sync AND delete its topic from Bemfa Cloud.

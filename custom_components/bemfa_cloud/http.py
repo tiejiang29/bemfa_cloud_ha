@@ -16,6 +16,7 @@ from .const import (
     CONF_UID,
     CREATE_TOPIC_URL,
     DELETE_TOPIC_URL,
+    DELETE_TOPIC_V5_URL,
     LOGGER,
     MODIFY_TOPIC_NAME_URL,
 )
@@ -175,6 +176,67 @@ class BemfaCloudHttp:
                 "topic": topic,
                 "type": BEMFA_TOPIC_TYPE_TCP_V2,
             },
+        )
+
+    async def async_delete_topic_v5(self, topic: str, bearer_token: str) -> None:
+        """Delete a topic using the Bemfa Cloud console API (v5).
+
+        The /v1/deleteTopic endpoint has a bug for type=7 topics (returns
+        40000 "Unknown error"). The Bemfa web console uses a different
+        endpoint — /v5/manage/v1/deleteTopic — which requires a Bearer
+        token (JWT) instead of uid. This endpoint works for type=7.
+
+        The Bearer token can be obtained from the Bemfa web console:
+        1. Login at https://cloud.bemfa.com/
+        2. Open browser DevTools → Application → Cookies → token
+        3. Copy the token value
+
+        Token expires after ~30 days. The user must re-enter it when it
+        expires.
+
+        Request format (confirmed via browser DevTools):
+          POST https://go.bemfa.com/v5/manage/v1/deleteTopic
+          Authorization: Bearer <token>
+          Content-Type: application/json
+          Body: {"topic":"<topic>","protoType":7}
+        """
+
+        headers = {
+            "Authorization": f"Bearer {bearer_token}",
+            "Content-Type": "application/json",
+        }
+        payload = {
+            "topic": topic,
+            "protoType": BEMFA_TOPIC_TYPE_TCP_V2,
+        }
+
+        async with self._session.post(
+            DELETE_TOPIC_V5_URL, json=payload, headers=headers, timeout=30
+        ) as response:
+            try:
+                data = await response.json(content_type=None)
+            except ValueError:
+                text = await response.text()
+                raise BemfaCloudApiError(
+                    f"Non-JSON response (HTTP {response.status}): {text[:200]}"
+                )
+
+        LOGGER.debug(
+            "Bemfa v5 delete: topic=%s response_status=%s response_body=%s",
+            topic, response.status, data,
+        )
+
+        if response.status >= 400:
+            raise BemfaCloudApiError(f"HTTP {response.status}: {data}")
+
+        code = data.get("code") if isinstance(data, dict) else None
+        if code == 0 or code is None:
+            LOGGER.debug("Bemfa v5 delete: topic %s deleted successfully", topic)
+            return
+
+        raise BemfaCloudApiError(
+            f"Bemfa v5 delete error (code={code}): "
+            f"{data.get('message') or data.get('msg') or data}"
         )
 
     async def _post_delete(self, url: str, payload: dict[str, Any]) -> None:

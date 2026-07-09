@@ -31,6 +31,7 @@ from .const import (
     AUTH_MODE_OAUTH,
     AUTH_MODE_WECHAT_SCAN,
     CONF_AUTH_MODE,
+    CONF_BEARER_TOKEN,
     CONF_REGION,
     CONF_UID,
     BEMFA_REGION,
@@ -77,6 +78,7 @@ BATCH_STANDALONE_DOMAINS = {
 STEP_KEYS_SCHEMA = vol.Schema(
     {
         vol.Required(CONF_UID): str,
+        vol.Optional(CONF_BEARER_TOKEN): str,
     }
 )
 
@@ -122,11 +124,14 @@ class ConfigFlow(AbstractOAuth2FlowHandler, domain=DOMAIN):
             if not _UID_RE.match(uid):
                 errors["base"] = "invalid_uid"
             else:
+                bearer_token = user_input.get(CONF_BEARER_TOKEN, "").strip()
                 data = {
                     CONF_UID: uid,
                     CONF_REGION: BEMFA_REGION,
                     CONF_AUTH_MODE: AUTH_MODE_KEYS,
                 }
+                if bearer_token:
+                    data[CONF_BEARER_TOKEN] = bearer_token
                 return await self._async_show_setup_next(data)
 
         return self.async_show_form(
@@ -703,41 +708,79 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
     async def async_step_destroy_sync(
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
-        """Destroy local syncs.
+        """Destroy local syncs and optionally delete cloud topics.
 
-        Removes the local sync configuration. Due to a Bemfa Cloud server-side
-        bug, type=7 (TCP V2) topics CANNOT be deleted via the HTTP API —
-        /v1/deleteTopic returns 40000 "Unknown error" for type=7.
-
-        The official bemfa_cloud_ha plugin also does not delete cloud topics
-        on sync removal (their README says "must be deleted manually in the
-        Bemfa console"). We follow the same design: only remove locally,
-        and show a persistent notification reminding the user to manually
-        clean up the cloud topic.
+        If a Bearer token is configured, uses the v5 console API to delete
+        type=7 topics (works around the /v1/deleteTopic bug). Otherwise,
+        only removes locally and shows a notification telling the user to
+        manually delete in the Bemfa console.
         """
 
         if user_input is not None:
-            # Collect info for the cleanup notification before removing
+            service = self._get_service()
+            has_token = service.has_bearer_token()
+
+            # Build a lookup from default_topic -> sync so we can resolve the
+            # *effective* topic (which may differ when a type override is set).
+            syncs_by_default_topic = {
+                sync.default_topic: sync
+                for sync in service.collect_supported_syncs()
+                if sync.default_topic in self._config
+            }
+
             removed_topics = []
+            failed_deletes = []
+
             for topic_key in user_input[OPTIONS_SELECT]:
                 config = self._config.get(topic_key, {})
                 name = config.get(OPTIONS_NAME, topic_key)
-                removed_topics.append((topic_key, name))
+
+                # Try cloud-side delete
+                sync = syncs_by_default_topic.get(topic_key)
+                if sync is not None:
+                    effective_topic = sync.topic
+                    try:
+                        await service.async_delete_cloud_topic(effective_topic)
+                        LOGGER.debug(
+                            "Deleted Bemfa cloud topic %s (%s)",
+                            effective_topic, name,
+                        )
+                    except Exception as err:  # noqa: BLE001
+                        LOGGER.warning(
+                            "Failed to delete Bemfa cloud topic %s (%s): %s. "
+                            "Please delete it manually in the Bemfa console.",
+                            effective_topic, name, err,
+                        )
+                        failed_deletes.append((effective_topic, name))
+                        removed_topics.append((effective_topic, name))
+                else:
+                    removed_topics.append((topic_key, name))
+
                 self._config.pop(topic_key, None)
 
-            # Show a persistent notification telling the user to manually
-            # delete the topics on the Bemfa Cloud console.
-            if removed_topics:
+            # Show notification for topics that need manual cleanup
+            if removed_topics and (not has_token or failed_deletes):
                 from homeassistant.components import persistent_notification
                 topic_list = "\n".join(
                     f"  • {name} (topic: {key})" for key, name in removed_topics
                 )
+                if not has_token:
+                    msg = (
+                        f"已移除 {len(removed_topics)} 个本地同步。\n\n"
+                        f"未配置 Bearer Token，无法自动删除云端主题。"
+                        f"以下主题需要你手动到巴法云控制台删除：\n\n{topic_list}\n\n"
+                        f"控制台地址：https://cloud.bemfa.com/\n\n"
+                        f"提示：在集成配置里填入 Bearer Token 后可自动删除。"
+                    )
+                else:
+                    msg = (
+                        f"已移除 {len(removed_topics)} 个本地同步。\n\n"
+                        f"以下主题自动删除失败，需要你手动到巴法云控制台删除：\n\n{topic_list}\n\n"
+                        f"控制台地址：https://cloud.bemfa.com/"
+                    )
                 persistent_notification.async_create(
                     self.hass,
-                    f"已移除 {len(removed_topics)} 个本地同步。\n\n"
-                    f"由于巴法云 API 限制（type=7 topic 无法通过 API 删除），"
-                    f"以下主题需要你手动到巴法云控制台删除：\n\n{topic_list}\n\n"
-                    f"控制台地址：https://cloud.bemfa.com/",
+                    msg,
                     title="Bemfa Cloud — 需手动删除云端主题",
                     notification_id=f"{DOMAIN}_cleanup_{self._entry_id}",
                 )

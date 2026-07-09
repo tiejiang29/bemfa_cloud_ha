@@ -14,6 +14,7 @@ EXCLUDED_SOURCE_PLATFORMS: Final = {DOMAIN, "behome"}
 
 CONF_UID: Final = "uid"
 CONF_REGION: Final = "region"
+CONF_BEARER_TOKEN: Final = "bearer_token"
 BEMFA_REGION: Final = "cn-03"
 CONF_AUTH_MODE: Final = "auth_mode"
 AUTH_MODE_KEYS: Final = "keys"
@@ -102,6 +103,7 @@ BEMFA_TOPIC_TYPE_TCP_V2: Final = 7
 CREATE_TOPIC_URL: Final = "https://pro.bemfa.com/vs/web/v2/createTopicNoSecret"
 ADD_TOPICS_URL: Final = "https://pro.bemfa.com/vs/web/v2/addTopicsNoSecret"
 DELETE_TOPIC_URL: Final = "https://pro.bemfa.com/v1/deleteTopic"
+DELETE_TOPIC_V5_URL: Final = "https://go.bemfa.com/v5/manage/v1/deleteTopic"
 CHANGE_TOPIC_GROUP_URL: Final = "http://apis.bemfa.com/vb/api/v1/changeTopicGroup"
 CHANGE_TOPIC_ROOM_URL: Final = "http://apis.bemfa.com/vb/api/v1/changeTopicRoom"
 MODIFY_TOPIC_NAME_URL: Final = "https://apis.bemfa.com/va/modifyName"
