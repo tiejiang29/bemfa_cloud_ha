@@ -36,10 +36,6 @@ from .const import (
     BEMFA_REGION,
     DOMAIN,
     LOGGER,
-    OAUTH_AUTHORIZE_URL,
-    OAUTH_CLIENT_ID,
-    OAUTH_CLIENT_SECRET,
-    OAUTH_TOKEN_URL,
     OPTIONS_CONFIG,
     OPTIONS_NAME,
     OPTIONS_SELECT,
@@ -102,23 +98,6 @@ class ConfigFlow(AbstractOAuth2FlowHandler, domain=DOMAIN):
         self._wechat_login_task: asyncio.Task[dict[str, Any] | None] | None = None
         self._wechat_login_data: dict[str, Any] | None = None
         self._pending_entry_data: dict[str, Any] | None = None
-
-    @staticmethod
-    def async_get_implementations(
-        hass: HomeAssistant,
-    ) -> list[config_entry_oauth2_flow.AbstractOAuth2Implementation]:
-        """Return OAuth2 implementations."""
-
-        return [
-            config_entry_oauth2_flow.LocalOAuth2Implementation(
-                hass,
-                DOMAIN,
-                OAUTH_CLIENT_ID,
-                OAUTH_CLIENT_SECRET,
-                OAUTH_AUTHORIZE_URL,
-                OAUTH_TOKEN_URL,
-            )
-        ]
 
     @property
     def logger(self) -> logging.Logger:
@@ -397,7 +376,7 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
         self._sync: Sync | None = None
         self._is_create = True
 
-        LOGGER.warning(
+        LOGGER.debug(
             "Bemfa Cloud OptionsFlowHandler __init__: entry_id=%s, "
             "entry.options keys=%s, entry.options=%s, "
             "OPTIONS_CONFIG extracted=%s (type=%s, len=%s)",
@@ -412,7 +391,7 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
     async def async_step_init(self, user_input: dict[str, Any] | None = None) -> FlowResult:
         """Show option menu."""
 
-        LOGGER.warning(
+        LOGGER.debug(
             "Bemfa Cloud flow: async_step_init called. user_input=%s, "
             "current config has %d keys",
             user_input, len(self._config),
@@ -428,7 +407,7 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
         """Create many syncs at once."""
 
         # ALWAYS log entry into this step, regardless of user_input
-        LOGGER.warning(
+        LOGGER.debug(
             "Bemfa Cloud flow: async_step_create_all_syncs ENTERED. "
             "user_input is %s, user_input value=%s, sync_dict has %d entries, "
             "config has %d keys",
@@ -440,13 +419,13 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
 
         if user_input is not None:
             # Dump ALL keys in user_input so we can see what HA actually sent
-            LOGGER.warning(
+            LOGGER.debug(
                 "Bemfa Cloud flow: user_input ALL keys=%s, ALL values=%s",
                 list(user_input.keys()),
                 {k: (str(v)[:100] + '...' if len(str(v)) > 100 else v) for k, v in user_input.items()},
             )
             selected = user_input.get(OPTIONS_SELECT, [])
-            LOGGER.warning(
+            LOGGER.debug(
                 "Bemfa Cloud create_all_syncs: user submitted. "
                 "OPTIONS_SELECT=%s (type=%s, len=%s), sync_dict has %d entries",
                 selected, type(selected).__name__,
@@ -455,7 +434,7 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
             )
 
             if not selected:
-                LOGGER.warning(
+                LOGGER.debug(
                     "Bemfa Cloud create_all_syncs: OPTIONS_SELECT is empty or missing. "
                     "Full user_input keys=%s, full user_input=%s",
                     list(user_input.keys()), user_input,
@@ -474,7 +453,7 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
             # HA versions)
             if isinstance(selected, str):
                 selected = [selected]
-                LOGGER.warning(
+                LOGGER.debug(
                     "Bemfa Cloud create_all_syncs: converted string to list: %s",
                     selected,
                 )
@@ -515,13 +494,13 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
             for sync in syncs:
                 sync.config = {OPTIONS_NAME: sync.name}
                 self._config[sync.default_topic] = sync.config.copy()
-                LOGGER.warning(
+                LOGGER.debug(
                     "Bemfa Cloud create_all_syncs: saving config for entity=%s "
                     "default_topic=%s name=%s",
                     sync.entity_id, sync.default_topic, sync.name,
                 )
 
-            LOGGER.warning(
+            LOGGER.debug(
                 "Bemfa Cloud create_all_syncs: saving %d syncs to config entry options. "
                 "Total config keys after save: %d",
                 len(syncs), len(self._config),
@@ -529,7 +508,7 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
             return self.async_create_entry(title="", data={OPTIONS_CONFIG: self._config})
 
         self._sync_dict = self._collect_batchable_syncs()
-        LOGGER.warning(
+        LOGGER.debug(
             "Bemfa Cloud create_all_syncs: showing form with %d selectable syncs",
             len(self._sync_dict),
         )
@@ -667,7 +646,7 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
 
         if is_new_sync:
             # New sync — just save config, no old topic to delete.
-            LOGGER.warning(
+            LOGGER.debug(
                 "Bemfa Cloud create_sync: new sync for entity=%s "
                 "default_topic=%s, saving with override=%r",
                 self._sync.entity_id, self._sync.default_topic,
@@ -689,7 +668,7 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                 self._sync.config = user_input.copy()
                 new_effective_topic = self._sync.topic
 
-                LOGGER.warning(
+                LOGGER.debug(
                     "Bemfa Cloud modify_sync: type changed for entity=%s "
                     "(old_override=%r -> new_override=%r). "
                     "Old topic=%s, New topic=%s. "
@@ -702,12 +681,12 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                     service = self._get_service()
                     try:
                         await service.async_delete_cloud_topic(old_effective_topic)
-                        LOGGER.warning(
+                        LOGGER.debug(
                             "Bemfa Cloud modify_sync: deleted old topic %s from cloud",
                             old_effective_topic,
                         )
                     except Exception as err:  # noqa: BLE001
-                        LOGGER.warning(
+                        LOGGER.debug(
                             "Bemfa Cloud modify_sync: failed to delete old topic %s: %s. "
                             "You may need to remove it manually in the Bemfa console.",
                             old_effective_topic, err,

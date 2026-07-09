@@ -125,7 +125,7 @@ class BemfaCloudService:
 
         try:
             await self._ensure_topics(syncs)
-            LOGGER.warning("Bemfa Cloud restore: _ensure_topics succeeded for %d syncs", len(syncs))
+            LOGGER.debug("Bemfa Cloud restore: _ensure_topics succeeded for %d syncs", len(syncs))
         except Exception as err:  # noqa: BLE001
             # Use repr() instead of str() because some exceptions (e.g.
             # aiohttp ClientError / RuntimeError "Session is closed") have
@@ -142,7 +142,7 @@ class BemfaCloudService:
 
         try:
             await self._tcp.async_add_syncs(syncs)
-            LOGGER.warning("Bemfa Cloud restore: TCP subscribe succeeded for %d syncs", len(syncs))
+            LOGGER.debug("Bemfa Cloud restore: TCP subscribe succeeded for %d syncs", len(syncs))
         except Exception as err:  # noqa: BLE001
             LOGGER.error(
                 "Bemfa Cloud restore: TCP subscribe FAILED: %s (type=%s, repr=%r)",
@@ -152,7 +152,7 @@ class BemfaCloudService:
             raise
 
         self._syncs_by_entity_id = {sync.entity_id: sync for sync in syncs}
-        LOGGER.warning("Bemfa Cloud restore: done, %d syncs active", len(self._syncs_by_entity_id))
+        LOGGER.debug("Bemfa Cloud restore: done, %d syncs active", len(self._syncs_by_entity_id))
 
     def collect_supported_syncs(self) -> list[Sync]:
         """Collect all supported HA syncs."""
@@ -323,7 +323,7 @@ class BemfaCloudService:
 
     async def _ensure_topics(self, syncs: list[Sync]) -> None:
         if not syncs:
-            LOGGER.warning("Bemfa Cloud _ensure_topics: no syncs to create, skipping")
+            LOGGER.debug("Bemfa Cloud _ensure_topics: no syncs to create, skipping")
             return
         payloads = [
             TopicPayload(topic=sync.topic, name=sync.name, room=self._sync_room(sync))
@@ -335,7 +335,7 @@ class BemfaCloudService:
             [(p.topic, p.name) for p in payloads],
         )
         await self._http.async_create_topics(payloads)
-        LOGGER.warning("Bemfa Cloud _ensure_topics: API call returned successfully")
+        LOGGER.debug("Bemfa Cloud _ensure_topics: API call returned successfully")
 
     def _start_registry_listeners(self) -> None:
         """Listen for HA name and area changes and mirror them to Bemfa."""

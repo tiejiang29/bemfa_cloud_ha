@@ -256,7 +256,7 @@ class BemfaCloudHttp:
         if isinstance(raw_data, dict):
             business_code = raw_data.get("code", 0)
             if business_code == 40006:
-                LOGGER.warning("Bemfa topic already exists: %s", payload)
+                LOGGER.debug("Bemfa topic already exists: %s", payload)
                 return
             if business_code != 0:
                 raise BemfaCloudApiError(

@@ -150,7 +150,7 @@ class BemfaCloudTcp:
                 )
                 await self._subscribe(list(self._topic_to_sync))
                 await self._publish_all()
-                LOGGER.warning("Bemfa TCP ready, entering read loop")
+                LOGGER.debug("Bemfa TCP ready, entering read loop")
                 await self._read_loop(reader)
             except asyncio.CancelledError:
                 raise
@@ -198,7 +198,7 @@ class BemfaCloudTcp:
             # Log EVERY raw line received from Bemfa, regardless of whether
             # it parses as JSON. This is critical for debugging reverse
             # control (Bemfa -> HA) issues.
-            LOGGER.warning("Bemfa TCP raw received: %r", raw[:500])
+            LOGGER.debug("Bemfa TCP raw received: %r", raw[:500])
 
             try:
                 payload = json.loads(raw.decode("utf-8"))
@@ -208,7 +208,7 @@ class BemfaCloudTcp:
                 )
                 continue
 
-            LOGGER.warning("Bemfa TCP parsed payload: %s", payload)
+            LOGGER.debug("Bemfa TCP parsed payload: %s", payload)
             self._handle_payload(payload)
 
     def _handle_payload(self, payload: dict[str, Any]) -> None:
@@ -242,7 +242,7 @@ class BemfaCloudTcp:
             )
             return
         msg = payload["msg"]
-        LOGGER.warning("Bemfa TCP received topic=%s msg=%s", topic, self._msg_to_text(msg))
+        LOGGER.debug("Bemfa TCP received topic=%s msg=%s", topic, self._msg_to_text(msg))
         self._suppress_state_feedback(sync, seconds=2)
         sync.resolve_msg(msg)
         self._hass.async_create_task(
@@ -297,7 +297,7 @@ class BemfaCloudTcp:
                 LOGGER.warning("Bemfa TCP subscribe: _send returned False, closing writer")
                 await self._close_writer()
                 return False
-            LOGGER.warning("Bemfa TCP subscribe: _send returned True")
+            LOGGER.debug("Bemfa TCP subscribe: _send returned True")
         return True
 
     async def _publish_all(self) -> None:
