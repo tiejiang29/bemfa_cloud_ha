@@ -539,19 +539,20 @@ class BemfaCloudService:
 
     async def _ensure_topics(self, syncs: list[Sync]) -> None:
         if not syncs:
-            LOGGER.debug("Bemfa Cloud _ensure_topics: no syncs to create, skipping")
             return
         payloads = [
             TopicPayload(topic=sync.topic, name=sync.name, room=self._sync_room(sync))
             for sync in syncs
         ]
-        LOGGER.warning(
-            "Bemfa Cloud _ensure_topics: creating %d topics: %s",
-            len(payloads),
-            [(p.topic, p.name) for p in payloads],
-        )
         await self._http.async_create_topics(payloads)
-        LOGGER.debug("Bemfa Cloud _ensure_topics: API call returned successfully")
+        # Also update the name on existing topics. createTopicNoSecret
+        # returns 40006 (already exists) without updating the name, so
+        # we need to call modifyName separately to keep names in sync.
+        for sync in syncs:
+            try:
+                await self._http.async_modify_name(sync.topic, sync.name)
+            except Exception as err:  # noqa: BLE001
+                LOGGER.debug("Bemfa Cloud: modifyName failed for %s: %s", sync.topic, err)
 
     def _start_registry_listeners(self) -> None:
         """Listen for HA name and area changes and mirror them to Bemfa."""
