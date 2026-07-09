@@ -267,29 +267,12 @@ class BemfaCloudService:
             shared_data.pop("tcp", None)
 
     async def _async_restore_syncs(self) -> None:
-        # Debounce: if a restore is already in progress FOR THIS HASS
-        # INSTANCE (not just this service instance — HA creates a new
-        # BemfaCloudService on every reload, so an instance-level guard
-        # is useless). We use hass.data as a shared namespace across
-        # service instances.
-        #
-        # Without this, HA's add_update_listener fires multiple reload
-        # events on options change, each creating a new service that
-        # races to call the Bemfa create-topics API. The result is
-        # dozens of duplicate API calls in 1-2 seconds, which can:
-        #   1. Trigger Bemfa's rate limit
-        #   2. Overwhelm the TCP connection (hundreds of concurrent
-        #      connect attempts -> "TCP connection failed: " with empty
-        #      error message)
-        #   3. Cause aiohttp "Session is closed" errors that propagate
-        #      up as empty-message exceptions caught by _ensure_topics.
+        # Debounce: if a restore is already in progress, skip this one.
         DOMAIN_DATA = self._hass.data.setdefault(DOMAIN, {})
         service_data = DOMAIN_DATA.setdefault("_restore_state", {})
         if service_data.get("in_progress", False):
-            LOGGER.warning(
-                "Bemfa Cloud restore: another restore is already in progress "
-                "(probably from a recent reload), skipping this one to avoid "
-                "duplicate API calls and TCP connection storms."
+            LOGGER.debug(
+                "Bemfa Cloud restore: already in progress, skipping"
             )
             return
 

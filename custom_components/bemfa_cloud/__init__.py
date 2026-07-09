@@ -28,7 +28,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     service = BemfaCloudService(hass, dict(entry.data))
     await service.async_start(entry.options.get(OPTIONS_CONFIG, {}))
     hass.data[DOMAIN][entry.entry_id] = {"service": service}
-    entry.async_on_unload(entry.add_update_listener(async_reload_entry))
+    entry.async_on_unload(entry.add_update_listener(_async_reload_entry))
     _async_update_next_step_notification(hass, entry)
     return True
 
@@ -42,8 +42,35 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     return True
 
 
+async def _async_reload_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Reload a config entry when options change.
+
+    Instead of unload + setup (which kills the TCP connection and creates
+    a race condition where the new service's TCP isn't ready yet), we
+    just update the config on the existing service. The service then
+    re-runs _async_restore_syncs to pick up the new config, and the TCP
+    connection stays alive.
+
+    Only if the service doesn't exist (shouldn't happen normally) do we
+    fall back to full unload + setup.
+    """
+
+    data = hass.data.get(DOMAIN, {}).get(entry.entry_id)
+    if data is not None:
+        service = data["service"]
+        # Update the config and re-restore without killing TCP
+        service._config = entry.options.get(OPTIONS_CONFIG, {})
+        hass.async_create_background_task(
+            service._async_restore_syncs(), "bemfa_cloud_reload_restore"
+        )
+    else:
+        # Fallback: full unload + setup
+        await async_unload_entry(hass, entry)
+        await async_setup_entry(hass, entry)
+
+
 async def async_reload_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    """Reload a config entry."""
+    """Full reload (unload + setup). Used by HA's reload service."""
 
     await async_unload_entry(hass, entry)
     await async_setup_entry(hass, entry)
