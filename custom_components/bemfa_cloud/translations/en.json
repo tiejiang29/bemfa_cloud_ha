@@ -11,10 +11,12 @@
       },
       "keys": {
         "title": "Bemfa Cloud credentials",
-        "description": "Add the Bemfa Cloud account first. You can choose which Home Assistant entities to sync in the next step.\n\n**Bearer Token (optional)**: Used for automatic cloud topic deletion. To get it: login at https://cloud.bemfa.com/ → F12 DevTools → Application → Cookies → copy the token value. Token expires after ~30 days. If not provided, you must manually delete topics in the Bemfa console when removing syncs.",
+        "description": "Add the Bemfa Cloud account first.\n\n**Email + Password (recommended)**: Enter your Bemfa Cloud email and password. The plugin will auto-login to obtain a Bearer Token and refresh it every 30 days, enabling automatic cloud topic deletion.\n\n**Bearer Token (optional)**: Manually paste a token if not using email/password. Get it from cloud.bemfa.com → F12 → Application → Cookies → copy token. Expires after ~30 days.\n\nAll fields except uid are optional. Without them, you must manually delete topics in the Bemfa console.",
         "data": {
           "uid": "Bemfa private key",
-          "bearer_token": "Bearer Token (optional, for auto-delete cloud topics)"
+          "bearer_token": "Bearer Token (optional)",
+          "email": "Bemfa email (recommended, for auto token refresh)",
+          "password": "Bemfa password (recommended, for auto token refresh)"
         }
       },
       "wechat_scan": {

@@ -11,10 +11,12 @@
       },
       "keys": {
         "title": "巴法云凭据",
-        "description": "请先添加巴法云账号。下一步可以选择要同步到巴法云的 Home Assistant 实体。\n\n**Bearer Token（可选）**：用于自动删除云端主题。获取方法：登录 https://cloud.bemfa.com/ → F12 开发者工具 → Application → Cookies → 复制 token 值。Token 约 30 天过期，过期后需重新填入。不填则移除同步时需手动到巴法云控制台删除主题。",
+        "description": "请先添加巴法云账号。\n\n**邮箱 + 密码（推荐）**：填入巴法云账号的邮箱和密码，插件会自动登录获取 Bearer Token 并每 30 天自动刷新，移除同步时自动删除云端主题。\n\n**Bearer Token（可选）**：手动填入 token，不填邮箱密码时使用。获取方法：登录 cloud.bemfa.com → F12 → Application → Cookies → 复制 token。约 30 天过期需手动重新填入。\n\n以上都是可选项，不填则移除同步时需手动到巴法云控制台删除主题。",
         "data": {
           "uid": "巴法云私钥",
-          "bearer_token": "Bearer Token（可选，用于自动删除云端主题）"
+          "bearer_token": "Bearer Token（可选）",
+          "email": "巴法云邮箱（推荐，用于自动刷新 Token）",
+          "password": "巴法云密码（推荐，用于自动刷新 Token）"
         }
       },
       "wechat_scan": {

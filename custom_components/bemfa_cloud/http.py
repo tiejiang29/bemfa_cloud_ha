@@ -17,6 +17,7 @@ from .const import (
     CREATE_TOPIC_URL,
     DELETE_TOPIC_URL,
     DELETE_TOPIC_V5_URL,
+    EMAIL_LOGIN_URL,
     LOGGER,
     MODIFY_TOPIC_NAME_URL,
 )
@@ -238,6 +239,71 @@ class BemfaCloudHttp:
             f"Bemfa v5 delete error (code={code}): "
             f"{data.get('message') or data.get('msg') or data}"
         )
+
+    async def async_login(self, email: str, password: str) -> str:
+        """Login with email+password and return a Bearer JWT token.
+
+        Uses the same endpoint as the Bemfa web console:
+          POST https://go.bemfa.com/vb/web/v2/emailLogin
+
+        The password is obfuscated the same way the web console does it:
+          password field = 1 random char + base64(password) + 4 random chars
+        This is obfuscation, not encryption — the server strips the random
+        prefix/suffix and base64-decodes.
+
+        Returns the JWT token string (valid ~30 days).
+        """
+
+        import base64
+        import random
+        import string
+
+        # Charset matching the web console's random string generator
+        # (no ambiguous chars: no I, L, O, 0, 1)
+        rand_charset = "ABCDEFGHJKMNPQRSTWXYZabcdefhijkmnprstwxyz2345678"
+
+        email_b64 = base64.b64encode(email.lower().encode("utf-8")).decode("utf-8")
+        pw_b64 = base64.b64encode(password.encode("utf-8")).decode("utf-8")
+        # 1 random char prefix + base64(password) + 4 random chars suffix
+        pw_obfuscated = (
+            "".join(random.choices(rand_charset, k=1))
+            + pw_b64
+            + "".join(random.choices(rand_charset, k=4))
+        )
+
+        payload = {"email": email_b64, "password": pw_obfuscated}
+
+        async with self._session.post(
+            EMAIL_LOGIN_URL, json=payload, timeout=30
+        ) as response:
+            try:
+                data = await response.json(content_type=None)
+            except ValueError:
+                text = await response.text()
+                raise BemfaCloudApiError(
+                    f"Login non-JSON response (HTTP {response.status}): {text[:200]}"
+                )
+
+        if response.status >= 400:
+            raise BemfaCloudApiError(f"Login HTTP {response.status}: {data}")
+
+        # Response shape: {"data": {"code": 0, "token": "<JWT>", ...}}
+        inner = data.get("data") if isinstance(data, dict) else {}
+        if not isinstance(inner, dict):
+            raise BemfaCloudApiError(f"Login unexpected response: {data}")
+
+        code = inner.get("code")
+        if code != 0:
+            raise BemfaCloudApiError(
+                f"Login failed (code={code}): {inner.get('message') or inner.get('msg') or data}"
+            )
+
+        token = inner.get("token")
+        if not token:
+            raise BemfaCloudApiError(f"Login succeeded but no token in response: {data}")
+
+        LOGGER.debug("Bemfa login: successfully obtained token for %s", email)
+        return token
 
     async def _post_delete(self, url: str, payload: dict[str, Any]) -> None:
         """POST helper specialized for the delete endpoint.

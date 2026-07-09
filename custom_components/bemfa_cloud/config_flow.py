@@ -32,6 +32,8 @@ from .const import (
     AUTH_MODE_WECHAT_SCAN,
     CONF_AUTH_MODE,
     CONF_BEARER_TOKEN,
+    CONF_EMAIL,
+    CONF_PASSWORD,
     CONF_REGION,
     CONF_UID,
     BEMFA_REGION,
@@ -79,6 +81,8 @@ STEP_KEYS_SCHEMA = vol.Schema(
     {
         vol.Required(CONF_UID): str,
         vol.Optional(CONF_BEARER_TOKEN): str,
+        vol.Optional(CONF_EMAIL): str,
+        vol.Optional(CONF_PASSWORD): str,
     }
 )
 
@@ -125,6 +129,8 @@ class ConfigFlow(AbstractOAuth2FlowHandler, domain=DOMAIN):
                 errors["base"] = "invalid_uid"
             else:
                 bearer_token = user_input.get(CONF_BEARER_TOKEN, "").strip()
+                email = user_input.get(CONF_EMAIL, "").strip()
+                password = user_input.get(CONF_PASSWORD, "").strip()
                 data = {
                     CONF_UID: uid,
                     CONF_REGION: BEMFA_REGION,
@@ -132,6 +138,12 @@ class ConfigFlow(AbstractOAuth2FlowHandler, domain=DOMAIN):
                 }
                 if bearer_token:
                     data[CONF_BEARER_TOKEN] = bearer_token
+                # If both email and password are provided, store them for
+                # automatic token refresh. Only email OR only password is
+                # not useful — require both or neither.
+                if email and password:
+                    data[CONF_EMAIL] = email
+                    data[CONF_PASSWORD] = password
                 return await self._async_show_setup_next(data)
 
         return self.async_show_form(

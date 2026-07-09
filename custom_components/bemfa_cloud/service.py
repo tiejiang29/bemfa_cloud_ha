@@ -2,11 +2,16 @@
 
 from __future__ import annotations
 
+import asyncio
+import base64
+import json
+import time
+
 from homeassistant.const import EVENT_HOMEASSISTANT_STARTED, SERVICE_TURN_OFF, SERVICE_TURN_ON
 from homeassistant.core import CALLBACK_TYPE, CoreState, Event, HomeAssistant
 from homeassistant.helpers import area_registry, device_registry, entity_registry
 
-from .const import CONF_BEARER_TOKEN, DOMAIN, EXCLUDED_SOURCE_PLATFORMS, LOGGER, OPTIONS_NAME
+from .const import CONF_BEARER_TOKEN, CONF_EMAIL, CONF_PASSWORD, DOMAIN, EXCLUDED_SOURCE_PLATFORMS, LOGGER, OPTIONS_NAME
 from .http import BemfaCloudHttp, TopicPayload
 from .sync import SYNC_TYPES, Sync
 from .tcp import BemfaCloudTcp
@@ -22,16 +27,27 @@ class BemfaCloudService:
         self._http = BemfaCloudHttp(hass, credentials)
         self._tcp = BemfaCloudTcp(hass, credentials["uid"])
         self._bearer_token: str | None = credentials.get(CONF_BEARER_TOKEN)
+        self._email: str | None = credentials.get(CONF_EMAIL)
+        self._password: str | None = credentials.get(CONF_PASSWORD)
         self._config: dict[str, dict[str, str]] = {}
         self._syncs_by_entity_id: dict[str, Sync] = {}
         self._unsub_registry_listeners: list[CALLBACK_TYPE] = []
         self._restore_in_progress: bool = False
+        self._token_refresh_task: asyncio.Task | None = None
 
     async def async_start(self, config: dict[str, dict[str, str]]) -> None:
         """Start service and restore configured syncs."""
 
         self._config = config
         await self._tcp.async_start()
+
+        # If email+password are configured, auto-refresh the Bearer token.
+        # This runs in the background and ensures the token is always valid
+        # for cloud topic deletion (v5 API).
+        if self._email and self._password:
+            self._token_refresh_task = self._hass.async_create_background_task(
+                self._async_token_refresh_loop(), "bemfa_cloud_token_refresh"
+            )
 
         async def _start(event: Event | None = None) -> None:
             await self._async_restore_syncs()
@@ -45,8 +61,76 @@ class BemfaCloudService:
 
         self._start_registry_listeners()
 
+    async def _async_token_refresh_loop(self) -> None:
+        """Background task that keeps the Bearer token fresh.
+
+        On startup, if no token or token is near expiry, login immediately.
+        Then check every hour; refresh when <2 days until expiry.
+        """
+
+        while True:
+            try:
+                if self._should_refresh_token():
+                    await self._async_refresh_token()
+            except Exception as err:  # noqa: BLE001
+                LOGGER.warning(
+                    "Bemfa Cloud: token refresh failed: %s. "
+                    "Cloud topic deletion may not work until next successful refresh.",
+                    err,
+                )
+            # Check every hour
+            await asyncio.sleep(3600)
+
+    def _should_refresh_token(self) -> bool:
+        """Check if token needs refresh (missing or <2 days to expiry)."""
+
+        if not self._bearer_token:
+            return True
+
+        try:
+            # JWT structure: header.payload.signature
+            parts = self._bearer_token.split(".")
+            if len(parts) != 3:
+                return True
+            # Decode payload (add padding for base64)
+            payload_b64 = parts[1] + "=" * (4 - len(parts[1]) % 4)
+            payload = json.loads(base64.b64decode(payload_b64).decode("utf-8"))
+            exp = payload.get("exp")
+            if not exp:
+                return True
+            # Refresh if <2 days to expiry
+            remaining = exp - time.time()
+            if remaining < 172800:  # 2 days
+                LOGGER.debug(
+                    "Bemfa Cloud: token expires in %.0f hours, refreshing",
+                    remaining / 3600,
+                )
+                return True
+            return False
+        except Exception:  # noqa: BLE001
+            return True
+
+    async def _async_refresh_token(self) -> None:
+        """Login with email+password and update the stored token."""
+
+        if not self._email or not self._password:
+            return
+
+        LOGGER.debug("Bemfa Cloud: refreshing Bearer token via email login")
+        token = await self._http.async_login(self._email, self._password)
+        self._bearer_token = token
+        LOGGER.debug("Bemfa Cloud: Bearer token refreshed successfully")
+
     async def async_stop(self) -> None:
         """Stop service."""
+
+        if self._token_refresh_task is not None:
+            self._token_refresh_task.cancel()
+            try:
+                await self._token_refresh_task
+            except asyncio.CancelledError:
+                pass
+            self._token_refresh_task = None
 
         for unsub in self._unsub_registry_listeners:
             unsub()
