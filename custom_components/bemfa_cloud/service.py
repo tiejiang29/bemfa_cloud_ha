@@ -245,17 +245,18 @@ class BemfaCloudService:
             # Unsubscribe the old effective topic and re-subscribe the new one.
             if old_topic != new_topic:
                 await self._tcp.async_remove_sync(old_topic)
-                # Best-effort cloud-side delete of the OLD topic so it does
-                # not pile up as an orphan on the Bemfa console.
-                try:
-                    await self._http.async_delete_topic(old_topic)
-                except Exception as err:  # noqa: BLE001
-                    LOGGER.warning(
-                        "Failed to delete old Bemfa cloud topic %s after type "
-                        "change: %s. You may need to remove it manually.",
-                        old_topic,
-                        err,
-                    )
+                # Note: we do NOT delete the old topic from Bemfa Cloud
+                # because /v1/deleteTopic has a bug for type=7 (returns
+                # 40000 "Unknown error"). The user must manually delete
+                # the orphaned topic in the Bemfa console. This matches
+                # the official bemfa_cloud_ha plugin's behavior.
+                LOGGER.warning(
+                    "Bemfa Cloud: type override changed for %s. "
+                    "Old topic %s is now orphaned on Bemfa Cloud — "
+                    "please delete it manually in the Bemfa console. "
+                    "New topic %s will be created.",
+                    sync.entity_id, old_topic, new_topic,
+                )
                 await self._ensure_topics([sync])
                 await self._tcp.async_add_sync(sync)
             else:

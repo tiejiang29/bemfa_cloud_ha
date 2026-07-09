@@ -79,7 +79,7 @@
       },
       "destroy_sync": {
         "title": "Remove local sync",
-        "description": "Removes the local sync AND deletes the corresponding topic from Bemfa Cloud, so no manual cleanup is needed. If the cloud deletion fails (e.g. network error), the local sync is still removed and a warning is logged — you can then delete the topic manually in the Bemfa console.",
+        "description": "Removes the local sync configuration. Due to a Bemfa Cloud API limitation (type=7 topics cannot be deleted via API), the cloud topics must be deleted manually in the Bemfa console. A notification with the list of topics to clean up will appear after removal.",
         "data": {
           "select": "Topics"
         }

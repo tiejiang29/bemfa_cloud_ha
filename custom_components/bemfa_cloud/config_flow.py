@@ -705,42 +705,43 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
     ) -> FlowResult:
         """Destroy local syncs.
 
-        For each topic the user selected, we:
-          1. Look up the corresponding sync to determine the *effective* topic
-             (which may differ from the default_topic key if a type override
-             is set).
-          2. Call Bemfa Cloud to delete that topic from the cloud too — so
-             the user does not have to clean up manually in the Bemfa console.
-          3. Drop the local config entry.
-        Cloud-deletion failures are logged but do not block local cleanup;
-        the user can still delete the topic manually in the Bemfa console.
+        Removes the local sync configuration. Due to a Bemfa Cloud server-side
+        bug, type=7 (TCP V2) topics CANNOT be deleted via the HTTP API —
+        /v1/deleteTopic returns 40000 "Unknown error" for type=7.
+
+        The official bemfa_cloud_ha plugin also does not delete cloud topics
+        on sync removal (their README says "must be deleted manually in the
+        Bemfa console"). We follow the same design: only remove locally,
+        and show a persistent notification reminding the user to manually
+        clean up the cloud topic.
         """
 
         if user_input is not None:
-            service = self._get_service()
-            # Build a lookup from default_topic -> sync so we can resolve the
-            # *effective* topic (which may differ when a type override is set).
-            syncs_by_default_topic = {
-                sync.default_topic: sync
-                for sync in service.collect_supported_syncs()
-                if sync.default_topic in self._config
-            }
+            # Collect info for the cleanup notification before removing
+            removed_topics = []
+            for topic_key in user_input[OPTIONS_SELECT]:
+                config = self._config.get(topic_key, {})
+                name = config.get(OPTIONS_NAME, topic_key)
+                removed_topics.append((topic_key, name))
+                self._config.pop(topic_key, None)
 
-            for topic in user_input[OPTIONS_SELECT]:
-                # Cloud-side delete (best effort, non-blocking on failure).
-                sync = syncs_by_default_topic.get(topic)
-                if sync is not None:
-                    effective_topic = sync.topic
-                    try:
-                        await service.async_delete_cloud_topic(effective_topic)
-                    except Exception as err:  # noqa: BLE001
-                        LOGGER.warning(
-                            "Failed to delete Bemfa cloud topic %s: %s. "
-                            "You may need to remove it manually in the Bemfa console.",
-                            effective_topic,
-                            err,
-                        )
-                self._config.pop(topic, None)
+            # Show a persistent notification telling the user to manually
+            # delete the topics on the Bemfa Cloud console.
+            if removed_topics:
+                from homeassistant.components import persistent_notification
+                topic_list = "\n".join(
+                    f"  • {name} (topic: {key})" for key, name in removed_topics
+                )
+                persistent_notification.async_create(
+                    self.hass,
+                    f"已移除 {len(removed_topics)} 个本地同步。\n\n"
+                    f"由于巴法云 API 限制（type=7 topic 无法通过 API 删除），"
+                    f"以下主题需要你手动到巴法云控制台删除：\n\n{topic_list}\n\n"
+                    f"控制台地址：https://cloud.bemfa.com/",
+                    title="Bemfa Cloud — 需手动删除云端主题",
+                    notification_id=f"{DOMAIN}_cleanup_{self._entry_id}",
+                )
+
             return self.async_create_entry(title="", data={OPTIONS_CONFIG: self._config})
 
         topic_options = [
