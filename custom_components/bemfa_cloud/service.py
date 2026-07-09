@@ -478,11 +478,13 @@ class BemfaCloudService:
         """Delete a single topic from Bemfa Cloud (on-demand token).
 
         Ensures a valid Bearer token is available before calling v5 delete.
-        If token is expired:
-        - email+password configured → auto-login
-        - WeChat scan mode → show QR notification, wait for scan
-        If no token can be obtained, raises an error.
+        Also unsubscribes the topic from TCP before deleting (Bemfa may
+        reject deletion of topics with active subscribers).
         """
+
+        # First, unsubscribe this topic from TCP to avoid "删除失败" errors
+        # (Bemfa may reject deletion of topics with active subscribers).
+        await self._tcp.async_remove_sync(topic)
 
         token = await self._async_ensure_valid_token()
         if not token:
