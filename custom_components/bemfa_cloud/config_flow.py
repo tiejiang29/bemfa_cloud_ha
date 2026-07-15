@@ -746,19 +746,11 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
 
             # Build a lookup from default_topic -> sync so we can resolve the
             # *effective* topic (which may differ when a type override is set).
-            # CRITICAL: we must load the stored config (including device_type
-            # override) into each sync before calling sync.topic, otherwise
-            # sync.topic returns the default_topic (wrong suffix) instead of
-            # the effective topic (correct suffix with override applied).
-            syncs_by_default_topic = {}
-            for sync in service.collect_supported_syncs():
-                if sync.default_topic in self._config:
-                    # Load stored config so topic_suffix/topic reflect the
-                    # type override that was configured at add/edit time.
-                    stored_config = self._config[sync.default_topic]
-                    sync.config = stored_config.copy()
-                    sync.name = stored_config.get(OPTIONS_NAME, sync.name)
-                    syncs_by_default_topic[sync.default_topic] = sync
+            syncs_by_default_topic = {
+                sync.default_topic: sync
+                for sync in service.collect_supported_syncs()
+                if sync.default_topic in self._config
+            }
 
             removed_topics = []
             failed_deletes = []
@@ -767,16 +759,10 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                 config = self._config.get(topic_key, {})
                 name = config.get(OPTIONS_NAME, topic_key)
 
-                # Try cloud-side delete using the EFFECTIVE topic
-                # (which includes the type override suffix, e.g. 002 not 006)
+                # Try cloud-side delete
                 sync = syncs_by_default_topic.get(topic_key)
                 if sync is not None:
                     effective_topic = sync.topic
-                    LOGGER.debug(
-                        "Destroy: default_topic=%s, effective_topic=%s (override=%s)",
-                        topic_key, effective_topic,
-                        config.get("device_type", ""),
-                    )
                     try:
                         await service.async_delete_cloud_topic(effective_topic)
                         LOGGER.debug(

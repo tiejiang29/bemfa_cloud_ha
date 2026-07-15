@@ -39,19 +39,12 @@ class BemfaCloudService:
         """Start service and restore configured syncs."""
 
         self._config = config
+        await self._tcp.async_start()
 
-        # Use a shared TCP client stored in hass.data so that multiple
-        # service instances (from rapid reloads) don't create competing
-        # TCP connections. Only the first instance creates the TCP client;
-        # subsequent instances reuse it.
-        domain_data = self._hass.data.setdefault(DOMAIN, {})
-        shared_data = domain_data.setdefault("_shared", {})
-        if "tcp" not in shared_data:
-            shared_data["tcp"] = self._tcp
-            await self._tcp.async_start()
-        else:
-            # Reuse the existing TCP client — replace our reference
-            self._tcp = shared_data["tcp"]
+        # Token management is on-demand only:
+        # - email+password: login when a delete is needed, no background task
+        # - WeChat scan: show QR notification when a delete is needed
+        # - No background polling, no wasted API calls
 
         async def _start(event: Event | None = None) -> None:
             await self._async_restore_syncs()
@@ -122,19 +115,19 @@ class BemfaCloudService:
                 qr_data = await response.json(content_type=None)
 
             if response.status >= 400 or qr_data.get("code") not in (0, None):
-                LOGGER.warning("Bemfa Cloud: failed to fetch WeChat QR: %s", qr_data)
+                LOGGER.debug("Bemfa Cloud: failed to fetch WeChat QR: %s", qr_data)
                 return None
 
             payload = qr_data.get("data") if isinstance(qr_data.get("data"), dict) else {}
             ticket = str(payload.get("url") or "")
             sid = str(payload.get("sid") or "")
             if not ticket or not sid:
-                LOGGER.warning("Bemfa Cloud: WeChat QR response missing ticket/sid: %s", qr_data)
+                LOGGER.debug("Bemfa Cloud: WeChat QR response missing ticket/sid: %s", qr_data)
                 return None
 
             qr_image_url = WECHAT_QR_IMAGE_URL.format(ticket=ticket)
         except Exception as err:  # noqa: BLE001
-            LOGGER.warning("Bemfa Cloud: failed to prepare WeChat QR: %s", err)
+            LOGGER.debug("Bemfa Cloud: failed to prepare WeChat QR: %s", err)
             return None
 
         # Step 2: Show persistent notification with QR code
@@ -148,7 +141,7 @@ class BemfaCloudService:
             title="Bemfa Cloud — 请扫码续期 Token 以删除云端主题",
             notification_id=notification_id,
         )
-        LOGGER.warning("Bemfa Cloud: showing WeChat QR notification for token renewal (needed for delete)")
+        LOGGER.debug("Bemfa Cloud: showing WeChat QR notification for token renewal (needed for delete)")
 
         # Step 3: Poll for scan (every 3s, up to 5 minutes)
         deadline = time.time() + 300  # 5 minutes
@@ -183,10 +176,10 @@ class BemfaCloudService:
                 if new_token and isinstance(new_token, str) and new_token.startswith("eyJ"):
                     self._bearer_token = new_token
                     self._wechat_sid_history = True  # remember we've had a WeChat token
-                    LOGGER.warning("Bemfa Cloud: Bearer token renewed via WeChat scan")
+                    LOGGER.debug("Bemfa Cloud: Bearer token renewed via WeChat scan")
                     return new_token
                 else:
-                    LOGGER.warning("Bemfa Cloud: WeChat scan succeeded but no token: %s", inner)
+                    LOGGER.debug("Bemfa Cloud: WeChat scan succeeded but no token: %s", inner)
                     return None
 
             except asyncio.CancelledError:
@@ -207,7 +200,7 @@ class BemfaCloudService:
             title="Bemfa Cloud — Token 续期超时，删除已取消",
             notification_id=notification_id,
         )
-        LOGGER.warning("Bemfa Cloud: WeChat QR renewal timed out after 5 minutes")
+        LOGGER.debug("Bemfa Cloud: WeChat QR renewal timed out after 5 minutes")
         return None
 
     def _should_refresh_token(self) -> bool:
@@ -256,23 +249,32 @@ class BemfaCloudService:
         for unsub in self._unsub_registry_listeners:
             unsub()
         self._unsub_registry_listeners.clear()
-
-        # Only stop the shared TCP if we own it (we're the last service
-        # instance). During reload, a new service instance is created
-        # before the old one is stopped, so the TCP should stay alive.
-        domain_data = self._hass.data.get(DOMAIN, {})
-        shared_data = domain_data.get("_shared", {})
-        if shared_data.get("tcp") is self._tcp:
-            await self._tcp.async_stop()
-            shared_data.pop("tcp", None)
+        await self._tcp.async_stop()
 
     async def _async_restore_syncs(self) -> None:
-        # Debounce: if a restore is already in progress, skip this one.
+        # Debounce: if a restore is already in progress FOR THIS HASS
+        # INSTANCE (not just this service instance — HA creates a new
+        # BemfaCloudService on every reload, so an instance-level guard
+        # is useless). We use hass.data as a shared namespace across
+        # service instances.
+        #
+        # Without this, HA's add_update_listener fires multiple reload
+        # events on options change, each creating a new service that
+        # races to call the Bemfa create-topics API. The result is
+        # dozens of duplicate API calls in 1-2 seconds, which can:
+        #   1. Trigger Bemfa's rate limit
+        #   2. Overwhelm the TCP connection (hundreds of concurrent
+        #      connect attempts -> "TCP connection failed: " with empty
+        #      error message)
+        #   3. Cause aiohttp "Session is closed" errors that propagate
+        #      up as empty-message exceptions caught by _ensure_topics.
         DOMAIN_DATA = self._hass.data.setdefault(DOMAIN, {})
         service_data = DOMAIN_DATA.setdefault("_restore_state", {})
         if service_data.get("in_progress", False):
-            LOGGER.debug(
-                "Bemfa Cloud restore: already in progress, skipping"
+            LOGGER.warning(
+                "Bemfa Cloud restore: another restore is already in progress "
+                "(probably from a recent reload), skipping this one to avoid "
+                "duplicate API calls and TCP connection storms."
             )
             return
 
@@ -359,7 +361,7 @@ class BemfaCloudService:
             try:
                 syncs.extend(sync_type.collect_supported_syncs(self._hass))
             except Exception as err:  # noqa: BLE001
-                LOGGER.warning("Failed to collect %s syncs: %s", sync_type.__name__, err)
+                LOGGER.debug("Failed to collect %s syncs: %s", sync_type.__name__, err)
 
         syncs = [sync for sync in syncs if not self._is_excluded_sync(sync)]
         covered_entity_ids = {sync.entity_id for sync in syncs}
@@ -388,7 +390,7 @@ class BemfaCloudService:
 
                 fallback_syncs.append(Switch(self._hass, state.entity_id, state.name))
             except Exception as err:  # noqa: BLE001
-                LOGGER.warning("Failed to collect fallback sync for %s: %s", state.entity_id, err)
+                LOGGER.debug("Failed to collect fallback sync for %s: %s", state.entity_id, err)
         return fallback_syncs
 
     async def async_create_sync(self, sync: Sync, user_input: dict[str, str]) -> None:
@@ -476,13 +478,11 @@ class BemfaCloudService:
         """Delete a single topic from Bemfa Cloud (on-demand token).
 
         Ensures a valid Bearer token is available before calling v5 delete.
-        Also unsubscribes the topic from TCP before deleting (Bemfa may
-        reject deletion of topics with active subscribers).
+        If token is expired:
+        - email+password configured → auto-login
+        - WeChat scan mode → show QR notification, wait for scan
+        If no token can be obtained, raises an error.
         """
-
-        # First, unsubscribe this topic from TCP to avoid "删除失败" errors
-        # (Bemfa may reject deletion of topics with active subscribers).
-        await self._tcp.async_remove_sync(topic)
 
         token = await self._async_ensure_valid_token()
         if not token:
@@ -539,20 +539,19 @@ class BemfaCloudService:
 
     async def _ensure_topics(self, syncs: list[Sync]) -> None:
         if not syncs:
+            LOGGER.debug("Bemfa Cloud _ensure_topics: no syncs to create, skipping")
             return
         payloads = [
             TopicPayload(topic=sync.topic, name=sync.name, room=self._sync_room(sync))
             for sync in syncs
         ]
+        LOGGER.warning(
+            "Bemfa Cloud _ensure_topics: creating %d topics: %s",
+            len(payloads),
+            [(p.topic, p.name) for p in payloads],
+        )
         await self._http.async_create_topics(payloads)
-        # Also update the name on existing topics. createTopicNoSecret
-        # returns 40006 (already exists) without updating the name, so
-        # we need to call modifyName separately to keep names in sync.
-        for sync in syncs:
-            try:
-                await self._http.async_modify_name(sync.topic, sync.name)
-            except Exception as err:  # noqa: BLE001
-                LOGGER.debug("Bemfa Cloud: modifyName failed for %s: %s", sync.topic, err)
+        LOGGER.debug("Bemfa Cloud _ensure_topics: API call returned successfully")
 
     def _start_registry_listeners(self) -> None:
         """Listen for HA name and area changes and mirror them to Bemfa."""
@@ -640,13 +639,13 @@ class BemfaCloudService:
         try:
             await self._http.async_modify_name(sync.topic, name)
         except Exception as err:  # noqa: BLE001
-            LOGGER.warning("Failed to sync Bemfa topic name for %s: %s", sync.topic, err)
+            LOGGER.debug("Failed to sync Bemfa topic name for %s: %s", sync.topic, err)
 
     async def _sync_bemfa_room(self, sync: Sync) -> None:
         try:
             await self._http.async_modify_room([sync.topic], self._sync_room(sync))
         except Exception as err:  # noqa: BLE001
-            LOGGER.warning("Failed to sync Bemfa topic room for %s: %s", sync.topic, err)
+            LOGGER.debug("Failed to sync Bemfa topic room for %s: %s", sync.topic, err)
 
     def _sync_room(self, sync: Sync) -> str:
         """Return the HA area name that should be used as Bemfa room."""

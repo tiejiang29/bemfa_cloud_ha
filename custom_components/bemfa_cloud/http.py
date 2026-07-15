@@ -40,24 +40,25 @@ class TopicPayload:
     def as_api_item(self) -> dict[str, Any]:
         """Return the API item payload.
 
-        Truncates the name to fit Bemfa's v_name column. Testing showed
-        32 bytes still triggers 'Data too long' for some names, so we use
-        30 bytes to be safe.
+        Truncates the name to fit Bemfa's v_name column (32 bytes in
+        UTF-8). Without truncation, names like 'Yeelight智能LED吸顶灯
+        升级版  灯' (40 bytes) cause a database error that fails the
+        entire API call.
         """
         name = self.name
         if name:
             encoded = name.encode("utf-8")
-            if len(encoded) > 30:
-                # Truncate at 30 bytes, being careful not to split a
+            if len(encoded) > 32:
+                # Truncate at 32 bytes, being careful not to split a
                 # multi-byte UTF-8 character.
-                truncated = encoded[:30]
+                truncated = encoded[:32]
                 # UTF-8 continuation bytes start with 0b10xxxxxx (0x80-0xBF).
                 # Walk back until we're not in the middle of a character.
                 while truncated and (truncated[-1] & 0xC0) == 0x80:
                     truncated = truncated[:-1]
                 name = truncated.decode("utf-8", errors="ignore")
                 LOGGER.warning(
-                    "Bemfa Cloud: truncated topic name %r -> %r (30 byte limit)",
+                    "Bemfa Cloud: truncated topic name %r -> %r (32 byte limit)",
                     self.name, name,
                 )
 
