@@ -1,4 +1,4 @@
-# Bemfa Cloud Home Assistant 集成（Type Override Fork）
+# Bemfa Cloud Home Assistant 集成（修改版）
 
 [![GitHub Release][releases-shield]][releases]
 [![GitHub Activity][commits-shield]][commits]
