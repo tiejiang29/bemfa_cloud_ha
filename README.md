@@ -1,45 +1,50 @@
 # Bemfa Cloud Home Assistant 集成（修改版）
 
-[![GitHub Release][releases-shield]][releases]
-[![GitHub Activity][commits-shield]][commits]
-[![License][license-shield]](LICENSE)
+[![GitHub Release](https://img.shields.io/github/v/release/tiejiang29/bemfa_cloud_ha.svg)](https://github.com/tiejiang29/bemfa_cloud_ha/releases)
+[![GitHub Activity](https://img.shields.io/github/commit-activity/y/tiejiang29/bemfa_cloud_ha.svg)](https://github.com/tiejiang29/bemfa_cloud_ha/commits/main)
+[![License](https://img.shields.io/github/license/tiejiang29/bemfa_cloud_ha.svg)](LICENSE)
 
-[![hacs][hacsbadge]][hacs]
-[![Community Forum][forum-shield]][forum]
+[![hacs](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://hacs.xyz)
 
-_将 Home Assistant 中的设备同步到巴法云。_
+_将 Home Assistant 中的设备同步到巴法云，通过小爱同学等语音助手控制 HA 设备。_
 
-**这是 [`bemfa/bemfa_cloud_ha`](https://github.com/bemfa/bemfa_cloud_ha) 的 fork，额外增加了设备类型覆盖（type override）和自动删除云端主题功能。**
-
-**Bemfa Cloud 会把 HA 里的本地实体映射为巴法云 TCP V2 设备，让用户可以通过巴法云、小爱同学等入口控制 HA 设备。**
+**基于 [`bemfa/bemfa_cloud_ha`](https://github.com/bemfa/bemfa_cloud_ha) 官方插件修改，已合并官方全部更新，并额外增加了多项实用功能。**
 
 简体中文 | [English](README_en.md)
 
-## Fork 特性（相比官方版本）
+## 与官方版本的差异
 
-| 特性 | 官方版本 | 本 Fork |
+| 特性 | 官方版本 | 修改版 |
 | --- | --- | --- |
 | 设备类型覆盖 | ❌ | ✅ 可手动把任意实体映射为任意巴法云设备类型（如 switch → 灯） |
-| 移除本地同步时删云端 topic | ❌ 需手动清理 | ✅ 自动调用巴法云 API 删除 |
-| 修改类型时删旧云端 topic | N/A | ✅ 自动调用巴法云 API 删除 |
+| 空调调温度模式不变 | ❌ 调温度后模式变自动（issue #16 未修复） | ✅ 已修复 |
+| 自动删除云端主题 | ❌ 需手动清理 | ✅ 通过 Bearer Token 自动删除 |
+| Token 自动获取 | ❌ 无 | ✅ 邮箱+密码自动登录 / 微信扫码续期 |
+| 热重载不断 TCP | ❌ 改配置后设备离线 | ✅ 配置变更时 TCP 保持连接 |
+| 长名称自动截断 | ❌ 超长名称创建失败 | ✅ 自动截断到 30 字节 |
+| 名称同步到巴法云 | ❌ 改名后云端不更新 | ✅ 自动调用 modifyName 更新 |
+| 列表显示巴法云类型 | ❌ 只显示 HA 域名 | ✅ 显示 `[switch→灯] 餐厅灯` |
+| 空调扫风控制 | ✅ | ✅ 已同步 |
+| CameraState 兼容 | ✅ | ✅ 已同步 |
+| OAuth 默认凭据 | ✅ | ✅ 已同步 |
 | 反回声机制 | ✅ | ✅ 保留 |
 | 名称/房间镜像 | ✅ | ✅ 保留 |
 | Stable Topic ID | ✅ | ✅ 保留 |
 | BeHome 防环 | ✅ | ✅ 保留 |
-| 3 种认证（私钥/微信扫码/OAuth） | ✅ | ✅ 保留 |
 
 ## 功能特性
 
-- **两种认证方式**：支持直接输入巴法云私钥，也支持 OAuth 登录
+- **三种认证方式**：私钥 / 微信扫码 / OAuth 登录
 - **按需创建主题**：选择需要同步的 HA 实体后，创建为巴法云 TCP V2 主题
 - **批量创建**：多个设备会优先使用批量接口创建
 - **TCP 长连接**：使用巴法云 TCP JSON V2 长连接订阅控制消息
 - **状态同步**：HA 状态变化会同步到巴法云云端缓存
 - **昵称和房间同步**：HA 中修改实体昵称、区域或区域名称后，会同步到巴法云设备昵称和房间
-- **同步关系更稳定**：修改实体昵称或房间后，通常不会重复创建巴法云设备
-- **来源过滤**：自动跳过 BeHome 生成的 HA 实体，避免把巴法云设备再次同步回巴法云
-- **设备类型覆盖（v0.1.6 新增）**：可手动把任意实体映射为任意巴法云设备类型，例如把 `switch` 映射为灯（`002`），让小爱同学"关全部灯"语音指令能联动到智能插座上的灯
-- **自动删除云端 topic（v0.1.6.2 新增）**：移除本地同步或修改类型时，自动调用巴法云 API 删除对应的云端 topic，无需手动去巴法云控制台清理
+- **来源过滤**：自动跳过 BeHome 生成的 HA 实体，避免控制回环
+- **设备类型覆盖**：可手动把任意实体映射为任意巴法云设备类型（如 switch → 灯）
+- **自动删除云端主题**：移除同步或修改类型时，自动删除巴法云云端 topic
+- **Token 自动管理**：邮箱+密码自动登录获取 Token，或微信扫码续期
+- **空调扫风控制**：支持左右扫风（l2r）和上下扫风（u2d）
 
 ## 支持的设备类型
 
@@ -61,17 +66,14 @@ _将 Home Assistant 中的设备同步到巴法云。_
 
 ### HACS 自定义仓库安装（推荐）
 
-本 fork 未提交到 HACS 默认商店，需要先添加为自定义仓库：
-
 1. 在 Home Assistant 中打开 **HACS**
 2. 右上角 ⋮ 菜单 → **自定义存储库**（Custom repositories）
 3. 填写：
    - **存储库地址**：`https://github.com/tiejiang29/bemfa_cloud_ha`
    - **类型**：Integration（集成）
 4. 点击 **添加**，然后关闭
-5. 在 HACS 搜索 **Bemfa Cloud**（注意要选带 "Type Override Fork" 标识的那个）
-6. 点击 **下载**，选择版本（默认是最新 release，目前是 `v0.1.6-type-override.2`）
-7. 重启 Home Assistant
+5. 在 HACS 搜索 **Bemfa Cloud**
+6. 点击 **下载**，重启 Home Assistant
 
 ### 接收自动更新
 
@@ -81,15 +83,13 @@ HACS 会自动检测本仓库的新 Release。当有新版本发布时：
 2. 点击 **安装** 即可一键升级
 3. 升级后 HA 会提示重启，重启后新版本生效
 
-你也可以在 HACS 集成页面手动检查更新：HACS → 集成 → Bemfa Cloud → 右上角 ⋮ → 更新信息
-
-### 从官方版本迁移到本 Fork
+### 从官方版本迁移
 
 如果你已经安装了官方 `bemfa/bemfa_cloud_ha`：
 
 1. **不要先卸载官方版本**（避免丢失现有的同步配置）
-2. 在 HACS 删除官方 Bemfa Cloud（注意：这会移除文件，但你的配置 entry 仍然保留）
-3. 按上面的步骤添加本 fork 为自定义仓库并下载
+2. 在 HACS 删除官方 Bemfa Cloud（配置 entry 会保留）
+3. 按上面的步骤添加本修改版为自定义仓库并下载
 4. 重启 HA
 5. 进入 **设置 → 设备与服务 → Bemfa Cloud → 配置**，你原来的同步配置应该都还在
 6. 现在可以在"编辑同步配置"里看到新的"巴法云设备类型（覆盖）"下拉框
@@ -102,13 +102,37 @@ HACS 会自动检测本仓库的新 Release。当有新版本发布时：
 4. 解压后把 `custom_components/bemfa_cloud/` 复制到 HA 的 `custom_components/` 目录
 5. 重启 Home Assistant
 
-## 设备类型覆盖（v0.1.6 新增）
+## 配置说明
 
-默认情况下，集成根据 HA 实体的 domain 自动决定巴法云设备类型（参见上表）。但有些场景下你可能希望**手动**改变映射，例如：
+### 私钥方式
+
+1. 进入 **设置 → 设备与服务 → 添加集成**
+2. 搜索 **Bemfa Cloud**
+3. 选择 **私钥**
+4. 输入巴法云用户私钥 `uid`
+5. （可选）填入 **邮箱 + 密码**：用于自动获取 Bearer Token，移除同步时自动删除云端主题
+6. （可选）填入 **Bearer Token**：手动填入 token，不填邮箱密码时使用。获取方法：登录 cloud.bemfa.com → F12 → Application → Cookies → 复制 token。约 30 天过期。
+7. 保存后，进入 Bemfa Cloud 的配置页面，选择需要同步的 HA 实体
+
+### Token 管理方案
+
+| 登录方式 | 获取 Token | 刷新方式 | 过期处理 |
+| --- | --- | --- | --- |
+| **邮箱+密码（推荐）** | 删除时自动登录 | 自动 | 永久有效 |
+| **微信扫码** | 扫码时自动获取 | 弹通知+二维码扫码续期 | 扫码后继续 |
+| **手动 Token** | 手动填入 | 无 | 30 天后手动重新填 |
+| **纯私钥** | 无 | 无 | 手动删云端 |
+
+### OAuth 方式
+
+大多数用户建议使用私钥方式。OAuth 登录复用 BeHome 的认证方式，主要用于需要 BeHome 授权流程的场景。
+
+## 设备类型覆盖
+
+默认情况下，集成根据 HA 实体的 domain 自动决定巴法云设备类型。但有些场景下你可能希望**手动**改变映射，例如：
 
 - 用智能插座（`switch`）接了一盏灯，希望小爱同学的"关全部灯"能联动到这个插座
 - 用智能开关（`switch`）接了风扇，希望被识别为风扇（`003`）
-- 把一个 `light` 当成普通开关（`006`）使用
 
 ### 使用方法
 
@@ -135,106 +159,42 @@ HACS 会自动检测本仓库的新 Release。当有新版本发布时：
 
 如果源实体不支持目标类型的所有属性，会自动降级：
 
-- `switch` 覆盖为 `002 灯`：只同步 on/off，亮度/颜色字段留空；语音"开/关灯"会调 `switch.turn_on/turn_off`
-- `switch` 覆盖为 `003 风扇`：只同步 on/off；语音"开/关风扇"会调 `switch.turn_on/turn_off`
-- `light` 覆盖为 `006 开关`：只同步 on/off，亮度/颜色信息不上报
-
-### 修改类型后的云端清理
-
-修改类型时，集成会**自动调用巴法云 API 删除旧的主题**，并在云端创建新主题——无需你手动去巴法云控制台清理。如果云端删除因网络问题失败，本地配置仍会更新成功，同时在 HA 日志里记录一条警告，你可以稍后到[巴法云控制台](https://cloud.bemfa.com/)手动删除残留主题。
-
-同样地，**移除本地同步**时也会自动删除对应的云端主题（v0.1.6-type-override.2 新增）。这与官方版本"只移除本地、云端需手动清理"的行为不同——如果你偏好官方的保守行为，可以保留旧版本。
-
-### Topic 命名稳定性
-
-类型覆盖不会改变本地配置存储的 key——内部使用一个独立的 `default_topic`（按 HA domain 默认类型生成的 topic）作为持久化 key，所以多次修改类型不会丢失其他配置（如名称、空调风速映射等）。
-
-## 配置说明
-
-如需同步到多个巴法云账号，可以重复添加 Bemfa Cloud 中枢。每个中枢绑定一个账号，并可单独选择要同步的 HA 实体。
-
-### 私钥方式
-
-1. 进入 **设置** -> **设备与服务** -> **添加集成**
-2. 搜索 **Bemfa Cloud**
-3. 选择 **私钥**
-4. 输入巴法云用户私钥 `uid`
-5. 保存后，进入 Bemfa Cloud 的配置页面，选择需要同步的 HA 实体。批量添加默认只展示空调、窗帘、灯、开关等主设备；状态和诊断类实体可通过“添加单个同步”手动添加。
-
-### OAuth 方式
-
-大多数用户建议使用私钥方式。OAuth 登录复用 BeHome 的认证方式，主要用于需要 BeHome 授权流程的场景；仅使用 OAuth 登录的用户需要先配置应用程序凭据。
-
-1. 进入 **设置** -> **设备与服务** -> **助手** -> **应用程序凭据**
-2. 创建新的应用程序凭据：
-   - **名称**：`Bemfa Cloud`
-   - **域**：`bemfa_cloud`
-   - **客户端 ID**：`88ac425b4558463aa813aed1690db730`
-   - **客户端密钥**：可填写任意安全字符串
-3. 回到 **集成** 页面添加 **Bemfa Cloud**
-4. 选择 OAuth 并完成授权
-
-如果授权后跳转到 `homeassistant.local` 并提示无法访问，请在 Home Assistant 的 **设置** -> **系统** -> **网络** 中配置正确的 Home Assistant URL。Docker 本机测试可使用 `http://localhost:8123`，局域网访问可使用 `http://HA主机IP:8123`。
+- `switch` 覆盖为 `002 灯`：只同步 on/off，亮度/颜色字段留空
+- `switch` 覆盖为 `003 风扇`：只同步 on/off
+- `light` 覆盖为 `006 开关`：只同步 on/off，亮度/颜色不上报
 
 ## 注意事项
 
-- 本集成方向是 **HA -> 巴法云**
-- BeHome 集成方向是 **巴法云 -> HA**
-- 两个集成可以同时安装，但 Bemfa Cloud 会跳过 BeHome 生成的实体，避免重复同步或控制回环
-- 同一个 HA 实体可以分别添加到不同 Bemfa Cloud 中枢，每个中枢的同步配置互相独立
-- 集成会尽量使用 HA 的稳定实体标识生成巴法云 topic；没有稳定标识的实体会退回使用 `entity_id`，修改 `entity_id` 后可能创建新的巴法云主题
-- 从旧版本升级后，如果巴法云里出现重复设备，可在巴法云控制台手动删除旧设备
+- 本集成方向是 **HA → 巴法云**
+- BeHome 集成方向是 **巴法云 → HA**
+- 两个集成可以同时安装，Bemfa Cloud 会跳过 BeHome 生成的实体
+- 同一个 HA 实体可以分别添加到不同 Bemfa Cloud 中枢，配置互相独立
+- 集成会尽量使用 HA 的稳定实体标识生成巴法云 topic；没有稳定标识的实体会退回使用 `entity_id`
 
 ## 常见问题
 
-### 同步失败怎么办？
-
-请检查巴法云私钥是否正确、Home Assistant 是否可以访问外网，并查看 Home Assistant 日志中的 Bemfa Cloud 错误信息。
-
 ### 移除本地同步会删除巴法云设备吗？
 
-不会。它只会停止本集成继续同步该实体，巴法云云端主题需要在巴法云控制台手动删除。
-
-### 修改 HA 实体 ID 会怎样？
-
-没有稳定标识的实体修改 `entity_id` 后，可能会在巴法云创建新的设备。
+如果配置了邮箱+密码或 Bearer Token，会自动删除云端主题。否则需要手动到巴法云控制台删除。
 
 ### 空调风速 `fan` 是怎么对应的？
 
-`fan=0` 表示自动风速，`fan=1` 到 `fan=5` 表示一档到五档风速，`fan=7/8/9` 分别表示低风、中风、高风。不同空调实体支持的风速名称不同，可在“编辑同步配置”里调整映射。
+`fan=0` 表示自动风速，`fan=1` 到 `fan=5` 表示一档到五档风速，`fan=7/8/9` 分别表示低风、中风、高风。可在"编辑同步配置"里调整映射。
 
-## 实现说明
+### 调温度后空调模式变了？
 
-1. 集成读取 HA 中支持的实体
-2. 排除 BeHome 和 Bemfa Cloud 自身生成的实体
-3. 根据实体类型生成巴法云设备 topic
-4. 使用 NoSecret 接口创建主题，固定 `type=7`、`region=cn-03`
-5. 通过 TCP V2 长连接批量订阅所有 topic
-6. 收到巴法云控制消息后调用 HA 服务控制实体
-7. HA 实体状态变化后，同步状态到巴法云
+官方版本存在此问题（issue #16），本修改版已修复——调温度时不会调用 `turn_on`，避免模式被重置。
 
 ## 支持与反馈
 
-- [GitHub Issues](https://github.com/bemfa/bemfa_cloud_ha/issues)
+- [GitHub Issues](https://github.com/tiejiang29/bemfa_cloud_ha/issues)
 - [Home Assistant 中文社区论坛](https://bbs.hassbian.com/)
-- [Home Assistant 官方社区论坛](https://community.home-assistant.io/)
 
 ## 致谢
 
-感谢 [larry-wong/bemfa](https://github.com/larry-wong/bemfa) 项目提供的参考和启发。
+- [bemfa/bemfa_cloud_ha](https://github.com/bemfa/bemfa_cloud_ha) — 官方巴法云 HA 集成
+- [larry-wong/bemfa](https://github.com/larry-wong/bemfa) — 早期社区参考项目
 
 ## 许可证
 
 本项目使用 MIT 许可证 - 查看 [LICENSE](LICENSE) 文件了解详情。
-
----
-
-[commits-shield]: https://img.shields.io/github/commit-activity/y/bemfa/bemfa_cloud_ha.svg?style=for-the-badge
-[commits]: https://github.com/bemfa/bemfa_cloud_ha/commits/main
-[hacs]: https://hacs.xyz
-[hacsbadge]: https://img.shields.io/badge/HACS-Custom-orange.svg?style=for-the-badge
-[forum-shield]: https://img.shields.io/badge/community-forum-brightgreen.svg?style=for-the-badge
-[forum]: https://community.home-assistant.io/
-[license-shield]: https://img.shields.io/github/license/bemfa/bemfa_cloud_ha.svg?style=for-the-badge
-[releases-shield]: https://img.shields.io/github/release/bemfa/bemfa_cloud_ha.svg?style=for-the-badge
-[releases]: https://github.com/bemfa/bemfa_cloud_ha/releases
