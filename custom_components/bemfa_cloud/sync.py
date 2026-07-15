@@ -572,7 +572,15 @@ class ControllableSync(Sync):
             if payload.get("on", True) is False:
                 self._async_call_service(DOMAIN, SERVICE_TURN_OFF, {})
                 return True
-            if payload.get("on") is True:
+            # Only call turn_on if there are no other actionable fields.
+            # When the payload has mode/t/fan, on:true is just a status
+            # indicator (device is on), not a command to turn on.
+            # Calling turn_on for climate may reset the HVAC mode to a
+            # default (e.g. auto), which overrides the current mode.
+            # This fixes the issue where adjusting temperature via Xiaoai
+            # causes the mode to change to auto and temperature to reset.
+            has_other_fields = any(k in payload for k in ("mode", "t", "fan", "v", "l2r", "u2d"))
+            if payload.get("on") is True and not has_other_fields:
                 self._async_call_service(DOMAIN, SERVICE_TURN_ON, {})
             if "mode" in payload:
                 mode = _to_int(payload["mode"])
