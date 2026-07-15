@@ -80,7 +80,7 @@ class BemfaCloudTcp:
             self._topic_to_sync[sync.topic] = sync
             topics.append(sync.topic)
 
-        LOGGER.warning(
+        LOGGER.debug(
             "Bemfa TCP: subscribing to %d topics via async_add_syncs: %s. "
             "Current writer is %s",
             len(topics), topics,
@@ -93,12 +93,12 @@ class BemfaCloudTcp:
         for sync in syncs:
             try:
                 await self.async_publish_sync(sync)
-                LOGGER.warning(
+                LOGGER.debug(
                     "Bemfa TCP: published state for topic=%s msg=%s",
                     sync.topic, sync.generate_msg(),
                 )
             except Exception as err:  # noqa: BLE001
-                LOGGER.warning(
+                LOGGER.debug(
                     "Bemfa TCP: publish failed for topic=%s: %s (type=%s)",
                     sync.topic, err, type(err).__name__,
                 )
@@ -144,7 +144,7 @@ class BemfaCloudTcp:
                     timeout=TCP_CONNECT_TIMEOUT,
                 )
                 self._writer = writer
-                LOGGER.warning(
+                LOGGER.debug(
                     "Bemfa TCP connected to %s:%s, subscribing to %d topics",
                     TCP_HOST, TCP_PORT, len(self._topic_to_sync),
                 )
@@ -203,7 +203,7 @@ class BemfaCloudTcp:
             try:
                 payload = json.loads(raw.decode("utf-8"))
             except ValueError:
-                LOGGER.warning(
+                LOGGER.debug(
                     "Bemfa TCP: non-JSON payload received, ignoring: %r", raw[:200]
                 )
                 continue
@@ -222,7 +222,7 @@ class BemfaCloudTcp:
             topic = payload["topic"]
 
         if not topic:
-            LOGGER.warning(
+            LOGGER.debug(
                 "Bemfa TCP _handle_payload: no topic found in payload. Keys=%s",
                 list(payload.keys()),
             )
@@ -230,13 +230,13 @@ class BemfaCloudTcp:
 
         sync = self._topic_to_sync.get(topic)
         if sync is None:
-            LOGGER.warning(
+            LOGGER.debug(
                 "Bemfa TCP _handle_payload: topic %s not in subscribed syncs %s",
                 topic, list(self._topic_to_sync.keys()),
             )
             return
         if "msg" not in payload:
-            LOGGER.warning(
+            LOGGER.debug(
                 "Bemfa TCP _handle_payload: no 'msg' field in payload for topic %s",
                 topic,
             )
@@ -289,12 +289,12 @@ class BemfaCloudTcp:
         if topics:
             # Match official bemfa_cloud_ha: use "topics" array
             payload = {"cmd": 1, "uid": self._uid, "topics": topics, "mode": 0}
-            LOGGER.warning(
+            LOGGER.debug(
                 "Bemfa TCP subscribe: sending cmd=1 for %d topics: %s",
                 len(topics), topics,
             )
             if not await self._send(payload):
-                LOGGER.warning("Bemfa TCP subscribe: _send returned False, closing writer")
+                LOGGER.debug("Bemfa TCP subscribe: _send returned False, closing writer")
                 await self._close_writer()
                 return False
             LOGGER.debug("Bemfa TCP subscribe: _send returned True")
@@ -317,7 +317,7 @@ class BemfaCloudTcp:
             data = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8") + b"\n"
             writer.write(data)
             await writer.drain()
-            LOGGER.warning(
+            LOGGER.debug(
                 "Bemfa TCP _send: sent %d bytes for cmd=%s topics=%s",
                 len(data), payload.get("cmd"), payload.get("topics"),
             )

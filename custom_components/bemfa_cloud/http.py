@@ -57,7 +57,7 @@ class TopicPayload:
                 while truncated and (truncated[-1] & 0xC0) == 0x80:
                     truncated = truncated[:-1]
                 name = truncated.decode("utf-8", errors="ignore")
-                LOGGER.warning(
+                LOGGER.debug(
                     "Bemfa Cloud: truncated topic name %r -> %r (32 byte limit)",
                     self.name, name,
                 )
@@ -103,7 +103,7 @@ class BemfaCloudHttp:
             try:
                 await self._async_create_topic(topic)
             except BemfaCloudApiError as err:
-                LOGGER.warning(
+                LOGGER.debug(
                     "Bemfa Cloud: failed to create topic %s (name=%r): %s. "
                     "Continuing with remaining topics.",
                     topic.topic, topic.name, err,
@@ -360,7 +360,7 @@ class BemfaCloudHttp:
 
         # Log the raw response at debug level so we can diagnose silent
         # failures where Bemfa returns an unexpected shape.
-        LOGGER.warning(
+        LOGGER.debug(
             "Bemfa API %s payload=%s response_status=%s response_body=%s",
             url, payload, response.status, data,
         )

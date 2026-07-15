@@ -82,7 +82,7 @@ class BemfaCloudService:
                 await self._async_refresh_token()
                 return self._bearer_token
             except Exception as err:  # noqa: BLE001
-                LOGGER.warning(
+                LOGGER.debug(
                     "Bemfa Cloud: email login failed during delete: %s", err
                 )
                 return None
@@ -285,14 +285,14 @@ class BemfaCloudService:
             service_data["in_progress"] = False
 
     async def _async_restore_syncs_inner(self) -> None:
-        LOGGER.warning(
+        LOGGER.debug(
             "Bemfa Cloud restore: starting. Configured topics=%d, hass state=%s",
             len(self._config),
             self._hass.state,
         )
         syncs = []
         all_collected = self.collect_supported_syncs()
-        LOGGER.warning(
+        LOGGER.debug(
             "Bemfa Cloud restore: collected %d candidate syncs from HA",
             len(all_collected),
         )
@@ -307,14 +307,14 @@ class BemfaCloudService:
                 continue
             sync.config = self._config.get(sync.default_topic, {OPTIONS_NAME: sync.name}).copy()
             sync.name = sync.config.get(OPTIONS_NAME, sync.name)
-            LOGGER.warning(
+            LOGGER.debug(
                 "Bemfa Cloud restore: will create topic=%s name=%s for entity=%s",
                 sync.topic, sync.name, sync.entity_id,
             )
             syncs.append(sync)
 
         if not syncs:
-            LOGGER.warning(
+            LOGGER.debug(
                 "Bemfa Cloud restore: 0 syncs matched. Config keys=%s, "
                 "collected default_topics=%s",
                 list(self._config.keys()),
@@ -454,7 +454,7 @@ class BemfaCloudService:
                         old_topic,
                     )
                 except Exception as err:  # noqa: BLE001
-                    LOGGER.warning(
+                    LOGGER.debug(
                         "Bemfa Cloud: failed to delete old topic %s after type "
                         "change: %s. You may need to remove it manually in the "
                         "Bemfa console.",
@@ -545,7 +545,7 @@ class BemfaCloudService:
             TopicPayload(topic=sync.topic, name=sync.name, room=self._sync_room(sync))
             for sync in syncs
         ]
-        LOGGER.warning(
+        LOGGER.debug(
             "Bemfa Cloud _ensure_topics: creating %d topics: %s",
             len(payloads),
             [(p.topic, p.name) for p in payloads],
