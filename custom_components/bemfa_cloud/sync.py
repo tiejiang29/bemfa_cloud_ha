@@ -187,8 +187,30 @@ class Sync(ABC):
         return self._entity_id
 
     def generate_option_label(self) -> str:
-        """Generate label in front end options list as "[domain]name"."""
+        """Generate label in front end options list.
+
+        Format: "[domain] name" or "[domain→bemfa_type] name" when a
+        type override is set, so the user can see at a glance what
+        Bemfa device type each entity is mapped to.
+        """
         domain = self._entity_id.split(".")[0]
+
+        # Check if a type override is configured
+        override = self._config.get(OPTIONS_DEVICE_TYPE) if self._config else None
+        if override:
+            _TYPE_LABELS = {
+                "001": "插座",
+                "002": "灯",
+                "003": "风扇",
+                "004": "传感器",
+                "005": "空调",
+                "006": "开关",
+                "009": "窗帘",
+            }
+            bemfa_label = _TYPE_LABELS.get(override, override)
+            return "[{domain}→{bemfa}] {name}".format(
+                domain=domain, bemfa=bemfa_label, name=self._name
+            )
         return "[{domain}] {name}".format(domain=domain, name=self._name)
 
     def generate_details_schema(self) -> dict[str, Any]:
