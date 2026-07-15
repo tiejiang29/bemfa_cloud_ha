@@ -15,6 +15,7 @@ from homeassistant.util.decorator import Registry
 from homeassistant.util.read_only_dict import ReadOnlyDict
 
 from .const import (
+    LOGGER,
     MSG_OFF,
     MSG_ON,
     MSG_SEPARATOR,
