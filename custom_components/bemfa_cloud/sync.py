@@ -649,14 +649,20 @@ class ControllableSync(Sync):
                     calls.append((DOMAIN, SERVICE_SET_TEMPERATURE, {ATTR_TEMPERATURE: target_temp}))
 
             if "fan" in payload or "v" in payload:
-                fan_value = payload.get("fan", payload.get("v"))
-                fan_mode = _climate_fan_mode(
-                    _to_int(fan_value),
-                    self._config,
-                    attributes.get(ATTR_FAN_MODES, []),
-                )
-                if fan_mode is not None and attributes.get(ATTR_FAN_MODE) != fan_mode:
-                    calls.append((DOMAIN, SERVICE_SET_FAN_MODE, {"fan_mode": fan_mode}))
+                fan_value = _to_int(payload.get("fan", payload.get("v")))
+                # Official 0.1.13 fix: during temperature adjustments Bemfa
+                # re-sends the cached fan state alongside the new temperature.
+                # Skip when the received value matches what we currently
+                # report to avoid ghost fan speed changes.
+                current_fan_value = self._current_climate_fan_value()
+                if fan_value != current_fan_value:
+                    fan_mode = _climate_fan_mode(
+                        fan_value,
+                        self._config,
+                        attributes.get(ATTR_FAN_MODES, []),
+                    )
+                    if fan_mode is not None and attributes.get(ATTR_FAN_MODE) != fan_mode:
+                        calls.append((DOMAIN, SERVICE_SET_FAN_MODE, {"fan_mode": fan_mode}))
 
             if "l2r" in payload or "u2d" in payload:
                 current_l2r, current_u2d = _climate_current_swing_axes(
@@ -741,6 +747,18 @@ class ControllableSync(Sync):
             return True
 
         return False
+
+    def _current_climate_fan_value(self) -> int | None:
+        """Return the Bemfa fan numeric value we'd currently report.
+
+        Climate message part index 3 carries the fan value (see
+        Climate._msg_generators in sync_climate.py). When the device is
+        off the parts list is truncated, so return None instead.
+        """
+        parts = self._generate_msg_parts()
+        if len(parts) > 3 and parts[3] != "":
+            return _to_int(parts[3])
+        return None
 
     def _async_call_service(
         self, domain: str, service: str, data: dict[str, Any]
