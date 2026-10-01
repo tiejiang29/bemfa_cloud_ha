@@ -474,6 +474,11 @@ class BemfaCloudService:
         await self._tcp.async_update_sync(sync)
         self._syncs_by_entity_id[sync.entity_id] = sync
 
+    async def async_rename_cloud_topic(self, topic: str, name: str) -> None:
+        """Push a topic's display name to Bemfa Cloud."""
+
+        await self._http.async_modify_name(topic, name)
+
     async def async_delete_cloud_topic(self, topic: str) -> None:
         """Delete a single topic from Bemfa Cloud (on-demand token).
 

@@ -660,6 +660,9 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
 
         from .const import OPTIONS_DEVICE_TYPE
 
+        # Captured before the new config is applied: `topic` embeds the device
+        # type suffix, so this is the topic currently live on Bemfa Cloud.
+        topic_before = self._sync.topic
         self._sync.name = user_input.get(OPTIONS_NAME, self._sync.name)
 
         # Detect type override change: if the user changed device_type,
@@ -722,6 +725,25 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                         )
             else:
                 self._sync.config = user_input.copy()
+
+        # The options form is what the user edits the Bemfa display name with,
+        # but nothing here pushed it to the cloud: creation only runs for new
+        # topics (an existing topic is answered with code 40006), and
+        # _sync_bemfa_name only mirrors entity-registry renames. So an edited
+        # name stayed in options while the cloud kept the old one. When the
+        # type override changed the topic instead, the new topic is created
+        # with this name by the restore that follows, so skip that case.
+        if not is_new_sync and topic_before == self._sync.topic and self._sync.name:
+            try:
+                await self._get_service().async_rename_cloud_topic(
+                    self._sync.topic, self._sync.name
+                )
+            except Exception as err:  # noqa: BLE001
+                LOGGER.warning(
+                    "Bemfa Cloud modify_sync: failed to rename topic %s to %r: %s. "
+                    "The name is saved locally but still differs on Bemfa Cloud.",
+                    self._sync.topic, self._sync.name, err,
+                )
 
         # Store under the stable default_topic key so that future type
         # overrides (which change the *effective* topic) do not orphan
