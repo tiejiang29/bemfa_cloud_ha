@@ -61,7 +61,7 @@ async def _async_reload_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
         # Update the config and re-restore without killing TCP
         service._config = entry.options.get(OPTIONS_CONFIG, {})
         hass.async_create_background_task(
-            service._async_restore_syncs(), "bemfa_cloud_reload_restore"
+            service._async_restore_syncs_with_retry(), "bemfa_cloud_reload_restore"
         )
     else:
         # Fallback: full unload + setup

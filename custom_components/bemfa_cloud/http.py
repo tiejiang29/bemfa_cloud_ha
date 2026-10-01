@@ -27,6 +27,28 @@ class BemfaCloudApiError(Exception):
     """Raised when Bemfa Cloud rejects an API request."""
 
 
+# Bemfa's device columns are fixed width; exceeding one of them fails the
+# whole request with a database error rather than clipping the value.
+MAX_FIELD_BYTES = 32
+
+
+def _truncate_field(value: str, limit: int = MAX_FIELD_BYTES) -> str:
+    """Clip a value to `limit` UTF-8 bytes without splitting a character."""
+
+    if not value:
+        return value
+
+    encoded = value.encode("utf-8")
+    if len(encoded) <= limit:
+        return value
+
+    truncated = encoded[:limit]
+    # UTF-8 continuation bytes start with 0b10xxxxxx (0x80-0xBF).
+    while truncated and (truncated[-1] & 0xC0) == 0x80:
+        truncated = truncated[:-1]
+    return truncated.decode("utf-8", errors="ignore")
+
+
 @dataclass(slots=True)
 class TopicPayload:
     """Topic create payload item."""
@@ -38,38 +60,29 @@ class TopicPayload:
     unit: str = ""
 
     def as_api_item(self) -> dict[str, Any]:
-        """Return the API item payload.
+        """Return the API item payload with Bemfa's column limits applied.
 
-        Truncates the name to fit Bemfa's v_name column (32 bytes in
-        UTF-8). Without truncation, names like 'Yeelight智能LED吸顶灯
-        升级版  灯' (40 bytes) cause a database error that fails the
-        entire API call.
+        These fields live in fixed-width columns; one byte over makes the
+        whole create call fail with a database error (the v_name incident
+        behind v0.2.1), so every one of them is clipped, not just the name.
         """
-        name = self.name
-        if name:
-            encoded = name.encode("utf-8")
-            if len(encoded) > 32:
-                # Truncate at 32 bytes, being careful not to split a
-                # multi-byte UTF-8 character.
-                truncated = encoded[:32]
-                # UTF-8 continuation bytes start with 0b10xxxxxx (0x80-0xBF).
-                # Walk back until we're not in the middle of a character.
-                while truncated and (truncated[-1] & 0xC0) == 0x80:
-                    truncated = truncated[:-1]
-                name = truncated.decode("utf-8", errors="ignore")
-                LOGGER.debug(
-                    "Bemfa Cloud: truncated topic name %r -> %r (32 byte limit)",
-                    self.name, name,
-                )
 
-        return {
+        item = {
             "type": BEMFA_TOPIC_TYPE_TCP_V2,
             "topic": self.topic,
-            "name": name,
-            "room": self.room,
-            "group": self.group,
+            "name": _truncate_field(self.name),
+            "room": _truncate_field(self.room),
+            "group": _truncate_field(self.group),
             "unit": self.unit,
         }
+        for field in ("name", "room", "group"):
+            original = getattr(self, field)
+            if item[field] != original:
+                LOGGER.debug(
+                    "Bemfa Cloud: truncated %s %r -> %r (%d byte limit)",
+                    field, original, item[field], MAX_FIELD_BYTES,
+                )
+        return item
 
 
 class BemfaCloudHttp:
@@ -82,7 +95,7 @@ class BemfaCloudHttp:
         self._uid = credentials[CONF_UID]
         self._region = BEMFA_REGION
 
-    async def async_create_topics(self, topics: list[TopicPayload]) -> None:
+    async def async_create_topics(self, topics: list[TopicPayload]) -> dict[str, str]:
         """Create one or more TCP V2 topics.
 
         We create topics ONE AT A TIME instead of using the batch
@@ -95,19 +108,35 @@ class BemfaCloudHttp:
              a database error, blocking all other topics.
           3. Single-topic createTopicNoSecret returns clear per-topic
              success/failure, and one failure does not block others.
+
+        Returns the topics Bemfa explicitly rejected, mapped to the reason.
+        A rejected topic already exists on cloud is NOT a failure here —
+        `_post` answers business code 40006 (already exists) silently, which
+        is the normal case for every device restored on startup.
         """
-        if not topics:
-            return
+        failures: dict[str, str] = {}
 
         for topic in topics:
             try:
                 await self._async_create_topic(topic)
             except BemfaCloudApiError as err:
-                LOGGER.debug(
+                reason = str(err) or repr(err)
+                LOGGER.warning(
                     "Bemfa Cloud: failed to create topic %s (name=%r): %s. "
                     "Continuing with remaining topics.",
-                    topic.topic, topic.name, err,
+                    topic.topic, topic.name, reason,
                 )
+                failures[topic.topic] = reason
+            except Exception as err:  # noqa: BLE001
+                # Transport-level problems say nothing about whether the
+                # topic exists, so the caller keeps the sync subscribed.
+                LOGGER.warning(
+                    "Bemfa Cloud: unable to confirm topic %s was created: %s. "
+                    "Keeping the sync active.",
+                    topic.topic, repr(err),
+                )
+
+        return failures
 
     async def _async_create_topic(self, topic: TopicPayload) -> None:
         payload = {
@@ -143,6 +172,8 @@ class BemfaCloudHttp:
 
         if not topics:
             return
+
+        room = _truncate_field(room)
 
         for index in range(0, len(topics), 50):
             await self._post(

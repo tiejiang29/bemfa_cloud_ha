@@ -16,6 +16,11 @@ from .http import BemfaCloudApiError, BemfaCloudHttp, TopicPayload
 from .sync import SYNC_TYPES, Sync
 from .tcp import BemfaCloudTcp
 
+# Restore touches the Bemfa HTTP API and the TCP broker, both of which can be
+# briefly unreachable right when HA comes up. One failure used to leave every
+# device unsubscribed until the next restart, so retry a few times instead.
+RESTORE_RETRY_DELAYS = (1, 2, 4)
+
 
 class BemfaCloudService:
     """Manage topic creation and TCP synchronization."""
@@ -47,11 +52,11 @@ class BemfaCloudService:
         # - No background polling, no wasted API calls
 
         async def _start(event: Event | None = None) -> None:
-            await self._async_restore_syncs()
+            await self._async_restore_syncs_with_retry()
 
         if self._hass.state == CoreState.running:
             self._hass.async_create_background_task(
-                self._async_restore_syncs(), "bemfa_cloud_restore_syncs"
+                self._async_restore_syncs_with_retry(), "bemfa_cloud_restore_syncs"
             )
         else:
             self._hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STARTED, _start)
@@ -251,6 +256,34 @@ class BemfaCloudService:
         self._unsub_registry_listeners.clear()
         await self._tcp.async_stop()
 
+    async def _async_restore_syncs_with_retry(self) -> None:
+        """Restore syncs, retrying a bounded number of times.
+
+        Never raises: this runs as a background task, and an unhandled task
+        exception used to be the end of the story — every device stayed
+        unsubscribed until someone restarted HA.
+        """
+
+        for attempt, delay in enumerate((*RESTORE_RETRY_DELAYS, None), start=1):
+            try:
+                await self._async_restore_syncs()
+                return
+            except asyncio.CancelledError:
+                raise
+            except Exception as err:  # noqa: BLE001
+                if delay is None:
+                    LOGGER.error(
+                        "Bemfa Cloud restore: giving up after %d attempts: %s (type=%s)",
+                        attempt, err, type(err).__name__,
+                    )
+                    return
+                LOGGER.warning(
+                    "Bemfa Cloud restore: attempt %d failed, retrying in %ds: %s "
+                    "(type=%s)",
+                    attempt, delay, err, type(err).__name__,
+                )
+                await asyncio.sleep(delay)
+
     async def _async_restore_syncs(self) -> None:
         # Debounce: if a restore is already in progress FOR THIS HASS
         # INSTANCE (not just this service instance — HA creates a new
@@ -323,8 +356,12 @@ class BemfaCloudService:
             return
 
         try:
-            await self._ensure_topics(syncs)
-            LOGGER.debug("Bemfa Cloud restore: _ensure_topics succeeded for %d syncs", len(syncs))
+            ready_syncs = await self._ensure_topics(syncs)
+            LOGGER.debug(
+                "Bemfa Cloud restore: _ensure_topics succeeded for %d/%d syncs",
+                len(ready_syncs),
+                len(syncs),
+            )
         except Exception as err:  # noqa: BLE001
             # Use repr() instead of str() because some exceptions (e.g.
             # aiohttp ClientError / RuntimeError "Session is closed") have
@@ -340,8 +377,8 @@ class BemfaCloudService:
             raise
 
         try:
-            await self._tcp.async_add_syncs(syncs)
-            LOGGER.debug("Bemfa Cloud restore: TCP subscribe succeeded for %d syncs", len(syncs))
+            await self._tcp.async_add_syncs(ready_syncs)
+            LOGGER.debug("Bemfa Cloud restore: TCP subscribe succeeded for %d syncs", len(ready_syncs))
         except Exception as err:  # noqa: BLE001
             LOGGER.error(
                 "Bemfa Cloud restore: TCP subscribe FAILED: %s (type=%s, repr=%r)",
@@ -350,7 +387,7 @@ class BemfaCloudService:
             )
             raise
 
-        self._syncs_by_entity_id = {sync.entity_id: sync for sync in syncs}
+        self._syncs_by_entity_id = {sync.entity_id: sync for sync in ready_syncs}
         LOGGER.debug("Bemfa Cloud restore: done, %d syncs active", len(self._syncs_by_entity_id))
 
     def collect_supported_syncs(self) -> list[Sync]:
@@ -398,18 +435,18 @@ class BemfaCloudService:
 
         sync.name = user_input.get(OPTIONS_NAME, sync.name)
         sync.config = user_input.copy()
-        await self._ensure_topics([sync])
-        await self._tcp.async_add_sync(sync)
-        self._syncs_by_entity_id[sync.entity_id] = sync
+        if await self._ensure_topics([sync]):
+            await self._tcp.async_add_sync(sync)
+            self._syncs_by_entity_id[sync.entity_id] = sync
 
     async def async_create_syncs(self, syncs: list[Sync]) -> None:
         """Create multiple syncs with default names."""
 
         for sync in syncs:
             sync.config = {OPTIONS_NAME: sync.name}
-        await self._ensure_topics(syncs)
-        await self._tcp.async_add_syncs(syncs)
-        self._syncs_by_entity_id.update({sync.entity_id: sync for sync in syncs})
+        ready_syncs = await self._ensure_topics(syncs)
+        await self._tcp.async_add_syncs(ready_syncs)
+        self._syncs_by_entity_id.update({sync.entity_id: sync for sync in ready_syncs})
 
     async def async_modify_sync(self, sync: Sync, user_input: dict[str, str]) -> None:
         """Modify sync configuration and publish the latest state.
@@ -460,19 +497,20 @@ class BemfaCloudService:
                         "Bemfa console.",
                         old_topic, err,
                     )
-                await self._ensure_topics([sync])
-                await self._tcp.async_add_sync(sync)
+                if await self._ensure_topics([sync]):
+                    await self._tcp.async_add_sync(sync)
+                    self._syncs_by_entity_id[sync.entity_id] = sync
             else:
                 # Override resolved to the same suffix as the default — no
                 # topic change, just publish the latest state.
                 await self._tcp.async_update_sync(sync)
-            self._syncs_by_entity_id[sync.entity_id] = sync
+                self._syncs_by_entity_id[sync.entity_id] = sync
             return
 
         self._config[sync.default_topic] = sync.config.copy()
-        await self._ensure_topics([sync])
-        await self._tcp.async_update_sync(sync)
-        self._syncs_by_entity_id[sync.entity_id] = sync
+        if await self._ensure_topics([sync]):
+            await self._tcp.async_update_sync(sync)
+            self._syncs_by_entity_id[sync.entity_id] = sync
 
     async def async_rename_cloud_topic(self, topic: str, name: str) -> None:
         """Push a topic's display name to Bemfa Cloud."""
@@ -542,10 +580,19 @@ class BemfaCloudService:
 
         self._config.pop(topic, None)
 
-    async def _ensure_topics(self, syncs: list[Sync]) -> None:
+    async def _ensure_topics(self, syncs: list[Sync]) -> list[Sync]:
+        """Create the topics for these syncs, returning the usable ones.
+
+        A sync whose topic Bemfa explicitly rejected is dropped from the
+        result so the caller neither subscribes to it nor reports it as
+        synced. Previously every failure was swallowed at DEBUG, which left
+        HA convinced a device was synced while the cloud had never accepted
+        the topic.
+        """
+
         if not syncs:
             LOGGER.debug("Bemfa Cloud _ensure_topics: no syncs to create, skipping")
-            return
+            return []
         payloads = [
             TopicPayload(topic=sync.topic, name=sync.name, room=self._sync_room(sync))
             for sync in syncs
@@ -555,8 +602,17 @@ class BemfaCloudService:
             len(payloads),
             [(p.topic, p.name) for p in payloads],
         )
-        await self._http.async_create_topics(payloads)
+        failures = await self._http.async_create_topics(payloads)
+        if failures:
+            LOGGER.warning(
+                "Bemfa Cloud _ensure_topics: skipping %d sync(s) whose topic "
+                "Bemfa rejected: %s",
+                len(failures),
+                failures,
+            )
+            return [sync for sync in syncs if sync.topic not in failures]
         LOGGER.debug("Bemfa Cloud _ensure_topics: API call returned successfully")
+        return list(syncs)
 
     def _start_registry_listeners(self) -> None:
         """Listen for HA name and area changes and mirror them to Bemfa."""
